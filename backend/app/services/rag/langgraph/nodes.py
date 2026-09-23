@@ -1,0 +1,99 @@
+"""LangGraph 节点实现：分析 / 直接回答(闲聊) / 检索 / 评估 / 生成 / 兜底。"""
+from functools import partial
+
+from app.core.config import get_settings
+from app.services.embedding.factory import get_embedding_provider
+from app.services.llm.base import BaseLLM
+from app.services.llm.mock import FALLBACK_TEXT
+from app.services.rag.langgraph.state import RAGState
+from app.services.search.hybrid import hybrid_search
+
+_settings = get_settings()
+
+_GREETINGS = ("你好", "您好", "hi", "hello", "hey", "早上好", "下午好", "晚上好", "在吗", "你是谁")
+
+
+def analyze_node(state: RAGState) -> dict:
+    """判断是否为知识库查询：短问候语→闲聊，其余→知识库查询。"""
+    question = state["question"].strip()
+    q = question.lower()
+    is_greeting_only = len(question) <= 6 and any(g in q for g in _GREETINGS)
+    return {"is_kb_query": not is_greeting_only}
+
+
+def direct_node(state: RAGState) -> dict:
+    """闲聊分支：直接回复，不检索。"""
+    return {
+        "answer": "你好！我是高校教务知识库助手，可以问我选课、奖学金、转专业、助学金、学籍等教务与学生服务相关问题。",
+        "sources": [],
+    }
+
+
+async def retrieve_node(state: RAGState) -> dict:
+    chunks = await hybrid_search(
+        state["question"],
+        state.get("kb_id"),
+        top_k=5,
+        search_type="hybrid",
+    )
+    return {"retrieved_chunks": chunks}
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+async def evaluate_node(state: RAGState) -> dict:
+    """判定检索结果是否相关。
+
+    双判据取 OR（任一达标即相关）：
+      ① RRF 融合分 top_score >= relevance_threshold
+      ② query 与 top chunk 的余弦相似度 >= relevance_cos_threshold
+    RRF 分对候选集敏感（量级 0.01-0.03），真相关内容可能低于阈值被误杀；
+    余弦相似度是绝对量纲，作为语义二次验证兜底。余弦计算失败时 fail-soft 回 RRF。
+    """
+    chunks = state.get("retrieved_chunks") or []
+    if not chunks:
+        return {"has_relevant_content": False, "context": ""}
+    top_score = max(c["score"] for c in chunks)
+    rrf_ok = top_score >= _settings.relevance_threshold
+
+    cos_ok = False
+    try:
+        provider = get_embedding_provider()
+        query_vector = (await provider.embed_texts([state["question"]]))[0]
+        best_cos = max(
+            _cosine(query_vector, c["content_vector"])
+            for c in chunks
+            if c.get("content_vector")
+        )
+        cos_ok = best_cos >= _settings.relevance_cos_threshold
+    except Exception:  # noqa: BLE001 —— 语义验证失败不影响 RRF 判定
+        pass
+
+    context = "\n".join(
+        f"[{i + 1}] 《{c.get('title') or c.get('doc_name') or '资料'}》：{c['content']}"
+        for i, c in enumerate(chunks[:3])
+    )
+    return {"has_relevant_content": rrf_ok or cos_ok, "context": context}
+
+
+async def generate_node(state: RAGState, llm: BaseLLM) -> dict:
+    prompt = f"{state.get('context') or ''}\n\n问题：{state['question']}"
+    answer = await llm.generate(prompt)
+    # 引用来源只保留回答实际引用的前 3 条，避免与 [n] 编号不一致
+    return {"answer": answer, "sources": (state.get("retrieved_chunks") or [])[:3]}
+
+
+def fallback_node(state: RAGState) -> dict:
+    """检索不到相关内容时的兜底回复（按规格文案）。"""
+    return {"answer": FALLBACK_TEXT, "sources": []}
+
+
+def build_generate(llm: BaseLLM):
+    return partial(generate_node, llm=llm)

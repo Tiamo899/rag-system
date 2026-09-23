@@ -1,0 +1,119 @@
+name: rag-system
+
+services:
+  postgres:
+    # Docker Hub 直连不通时用镜像加速器（1ms），改回官方源只需去掉前缀
+    image: docker.1ms.run/library/postgres:15
+    container_name: rag-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_knowledge}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag_knowledge}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch:
+    build:
+      context: ./docker/es
+    image: rag-es-ik:8.13.4
+    container_name: rag-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+
+  redis:
+    # 同 postgres，走镜像加速器
+    image: docker.1ms.run/library/redis:7
+    container_name: rag-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: rag-backend
+    environment:
+      # 两套 URL 都要：asyncpg 给业务、psycopg2 给 Alembic 迁移
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag_dev_password}@postgres:5432/${POSTGRES_DB:-rag_knowledge}
+      SYNC_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag_dev_password}@postgres:5432/${POSTGRES_DB:-rag_knowledge}
+      ES_URL: http://elasticsearch:9200
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-please-change-me-in-production}
+      # 维度与 ES 索引一致（硅基流动 bge-m3 = 1024）
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      # mock 向量相似度偏低，阈值按 mock 实测值 0.02（勿用代码默认 0.30）
+      RELEVANCE_THRESHOLD: ${RELEVANCE_THRESHOLD:-0.02}
+      # 语义二次验证：RRF 或 余弦任一达标即相关（bge-m3 真相关 0.64+，无关 <0.45）
+      RELEVANCE_COS_THRESHOLD: ${RELEVANCE_COS_THRESHOLD:-0.5}
+      # 模型 Provider（真实 key 放根目录 .env，不进镜像）
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      # 上传文件大小上限（MB），nginx 的 client_max_body_size 需同步改大
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-20}
+    depends_on:
+      postgres:      { condition: service_healthy }
+      elasticsearch: { condition: service_healthy }
+      redis:         { condition: service_healthy }
+    volumes:
+      - uploads:/app/data/uploads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: rag-frontend
+    depends_on:
+      backend: { condition: service_healthy }
+    ports:
+      - "80:80"
+
+volumes:
+  pgdata:
+  esdata:
+  redisdata:
+  uploads:
