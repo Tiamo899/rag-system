@@ -1,0 +1,2 @@
+{"id": "gv-01", "question": "学生每学期最多能请几天假？", "expect_docs": ["请假管理办法_2024版.md"], "expect_keywords": ["5天"], "forbidden_keywords": ["3天"]}
+{"id": "gv-02", "question": "请假超过几天需要学院审批？", "expect_docs": ["请假管理办法_2024版.md"], "expect_keywords": ["5天"], "forbidden_keywords": ["3天"]}
