@@ -1,0 +1,41 @@
+# 评测体系使用说明
+
+## 前置
+
+- PG + ES 容器运行（`docker compose up -d postgres elasticsearch redis`）
+- `backend/.env` 已配真实 LLM/Embedding（mock 下裁判自动跳过）
+
+## 首次：建评测库（幂等，可重跑）
+
+```bash
+cd backend
+python -m evals.setup_dataset
+```
+
+20 份演示 docx + 2 份版本冲突 md 全部向量化，库名「评测库」。
+
+## 跑分
+
+```bash
+cd backend
+python -m evals.run_eval --tag baseline            # 全量三数据集
+python -m evals.run_eval --tag phase1 --dataset multi_turn   # 单数据集
+```
+
+结果写入 `results/<日期>-<tag>-<数据集>.{json,md}`，**提交 git**。
+
+## 指标
+
+| 指标 | 含义 |
+|------|------|
+| Hit@3 | top-3 来源命中期望文档 |
+| 关键词 | 答案含任一 expect_keywords 且不含任何 forbidden_keywords |
+| 裁判 | LLM 按参考要点打 0/1；mock provider 时为 null |
+
+## 阶段对比
+
+- 基线：`--tag baseline`
+- Phase 1 后：`--tag phase1`（对比 `multi_turn` 的 Hit@3）
+- Phase 2 后：`--tag phase2`（对比 `governance`，旧版数字命中应归零）
+
+对比 = 直接看两份 md 报告，或 `git diff` results 目录。
