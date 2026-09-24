@@ -28,6 +28,7 @@ def test_multi_turn_schema():
         assert c["id"] and len(c["turns"]) >= 2
         for t in c["turns"]:
             assert t["q"] and t["expect_docs"]
+            assert "expect_keywords" in t, f"{c['id']} turns 缺 expect_keywords"
 
 
 def test_governance_schema():
@@ -43,9 +44,13 @@ def test_expect_docs_exist_in_corpus():
     """所有 expect_docs 必须是真实存在的语料文件名，防止手误。"""
     names = {p.name for p in CORPUS.rglob("*.docx")}
     names |= {p.name for p in DOCS.glob("*.md")}
-    for name in ("single_turn.jsonl", "governance.jsonl"):
+    for name in ("single_turn.jsonl", "multi_turn.jsonl", "governance.jsonl"):
         for c in _load(name):
-            for d in c["expect_docs"]:
+            if "turns" in c:  # multi_turn 的 expect_docs 嵌在各 turn 里
+                docs = [d for t in c["turns"] for d in t["expect_docs"]]
+            else:
+                docs = c["expect_docs"]
+            for d in docs:
                 assert d in names, f"{c['id']} 的 expect_docs 不存在: {d}"
 
 
