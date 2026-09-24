@@ -115,3 +115,29 @@ def test_results_written_to_disk(monkeypatch, tmp_path):
     payload = json.loads(js[0].read_text(encoding="utf-8"))
     assert payload["tag"] == "baseline"
     assert "hit_at3_rate" in payload
+
+
+def test_case_flow_error_recorded_and_run_continues(monkeypatch, tmp_path):
+    """单 case 失败不拖垮整轮：记录 error、速率只按成功 case 计、报告仍落盘。"""
+    async def fake_flow(question, kb_id):
+        if "失败" in question:
+            raise RuntimeError("provider boom")
+        return {"answer": "申请助学金需在系统提交",
+                "sources": [{"doc_name": "国家助学金评审办法.docx"}]}
+
+    monkeypatch.setattr(run_eval, "run_rag_flow", fake_flow)
+    cases = [_mk_case(cid="ok"), _mk_case(cid="bad", q="这里会失败？")]
+    report = asyncio.run(
+        run_eval.run_single_cases(cases, kb_id="kb", use_judge=False,
+                                  results_dir=tmp_path, tag="t")
+    )
+    # 报告仍生成
+    assert list(tmp_path.glob("*.json")) and list(tmp_path.glob("*.md"))
+    ok, bad = report["cases"]
+    assert ok["hit_at3"] is True and ok["keyword"] is True and "error" not in ok
+    assert bad["hit_at3"] is None and bad["keyword"] is None and bad["judge"] is None
+    assert bad["sources"] == [] and bad["answer"] == ""
+    assert "provider boom" in bad["error"]
+    # 速率只按成功 case 计，失败 case 被剔除
+    assert report["hit_at3_rate"] == 1.0
+    assert report["keyword_rate"] == 1.0
