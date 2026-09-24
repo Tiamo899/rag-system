@@ -5,8 +5,11 @@ from collections.abc import AsyncIterator
 
 class BaseLLM(ABC):
     @abstractmethod
-    async def generate(self, user_prompt: str) -> str:
-        """基于 prompt 生成回答。RAG 场景的 system 提示词由实现内部固定。"""
+    async def generate(self, user_prompt: str, temperature: float = 0.3) -> str:
+        """基于 prompt 生成回答。RAG 场景的 system 提示词由实现内部固定。
+
+        temperature 默认 0.3（业务问答）；评测裁判等确定性场景传 0.0。
+        """
 
     async def generate_stream(self, user_prompt: str) -> AsyncIterator[str]:
         """流式生成：默认整体生成后一次 yield（MockLLM 等同步实现零改动）。"""

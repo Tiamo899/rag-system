@@ -66,7 +66,7 @@ class OpenAICompatibleLLM(BaseLLM):
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(timeout=_LLM_TIMEOUT)
 
-    async def generate(self, user_prompt: str) -> str:
+    async def generate(self, user_prompt: str, temperature: float = 0.3) -> str:
         try:
             resp = await self._client.post(
                 f"{self.base_url}/chat/completions",
@@ -80,7 +80,7 @@ class OpenAICompatibleLLM(BaseLLM):
                         {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": 0.3,
+                    "temperature": temperature,
                     "stream": False,
                 },
             )

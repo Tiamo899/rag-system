@@ -46,7 +46,8 @@ def _parse_blocks(prompt: str) -> list[tuple[str | None, str]]:
 
 
 class MockLLM(BaseLLM):
-    async def generate(self, user_prompt: str) -> str:
+    async def generate(self, user_prompt: str, temperature: float = 0.3) -> str:
+        # temperature 仅协议兼容，Mock 输出确定性，忽略
         blocks = _parse_blocks(user_prompt)
         if not blocks:
             return FALLBACK_TEXT
