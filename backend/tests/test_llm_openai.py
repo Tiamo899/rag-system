@@ -25,6 +25,7 @@ async def test_generate_ok():
         assert req.headers["authorization"] == "Bearer k"
         body = json.loads(req.content)
         assert body["model"] == "deepseek-v4-flash"
+        assert body["temperature"] == 0.3  # 默认 temperature 不得漂移
         assert body["messages"][0]["role"] == "system"
         assert body["messages"][1] == {"role": "user", "content": "问题：你好"}
         return httpx.Response(

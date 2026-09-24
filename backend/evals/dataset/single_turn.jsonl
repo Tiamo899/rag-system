@@ -1,0 +1,10 @@
+{"id": "st-01", "question": "挂科了还能评奖学金吗？", "expect_docs": ["奖学金评定办法.docx"], "expect_keywords": ["奖学金"]}
+{"id": "st-02", "question": "转专业需要满足什么条件？", "expect_docs": ["转专业实施办法.docx"], "expect_keywords": ["转专业"]}
+{"id": "st-03", "question": "怎么申请休学？多久能复学？", "expect_docs": ["休学、复学与退学管理办法.docx"], "expect_keywords": ["休学"]}
+{"id": "st-04", "question": "补考不过怎么办？可以重修几次？", "expect_docs": ["补考、重修与缓考管理办法.docx"], "expect_keywords": ["重修"]}
+{"id": "st-05", "question": "国家助学金怎么申请？多久公示一次？", "expect_docs": ["国家助学金评审办法.docx"], "expect_keywords": ["助学金"]}
+{"id": "st-06", "question": "宿舍可以用电吹风吗？", "expect_docs": ["学生宿舍管理办法.docx"], "expect_keywords": ["宿舍"]}
+{"id": "st-07", "question": "图书馆本科生能借几本书？", "expect_docs": ["图书馆借阅与服务指南.docx"], "expect_keywords": ["借"]}
+{"id": "st-08", "question": "怎么预约心理咨询？", "expect_docs": ["心理健康教育与咨询服务指南.docx"], "expect_keywords": ["心理"]}
+{"id": "st-09", "question": "军训免训需要什么证明？", "expect_docs": ["新生入学教育与军训指南.docx"], "expect_keywords": ["军训"]}
+{"id": "st-10", "question": "每学期最多能选多少学分？", "expect_docs": ["选课管理办法.docx"], "expect_keywords": ["学分"]}
