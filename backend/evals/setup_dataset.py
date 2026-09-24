@@ -44,8 +44,15 @@ def find_eval_kb(client, headers: dict) -> dict | None:
 
 
 def _login(client) -> dict:
+    from app.core.config import get_settings
+
+    settings = get_settings()
     r = client.post(
-        "/api/v1/auth/login", json={"username": "admin", "password": "admin123"}
+        "/api/v1/auth/login",
+        json={
+            "username": settings.default_admin_username,
+            "password": settings.default_admin_password,
+        },
     )
     assert r.status_code == 200, f"登录失败: {r.text}"
     return {"Authorization": f"Bearer {r.json()['access_token']}"}

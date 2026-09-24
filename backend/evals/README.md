@@ -29,7 +29,7 @@ python -m evals.run_eval --tag phase1 --dataset multi_turn   # 单数据集
 | 指标 | 含义 |
 |------|------|
 | Hit@3 | top-3 来源命中期望文档 |
-| 关键词 | 答案含任一 expect_keywords 且不含任何 forbidden_keywords |
+| 关键词 | 答案含任一 expect_keywords 且不含任何 forbidden_keywords；`expect_keywords` 为空的轮次恒判负（数据设计如此） |
 | 裁判 | LLM 按参考要点打 0/1；mock provider 或该轮 `expect_keywords` 为空（无参考要点可对）时为 null |
 
 ## 阶段对比
