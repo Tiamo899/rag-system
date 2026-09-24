@@ -23,7 +23,7 @@ def discover_corpus(base_dir: Path | None = None) -> list[Path]:
     """演示 docx（20）+ 冲突 md（2），排序稳定、去重。"""
     root = base_dir or PROJECT_DIR
     campus = root / "knowledge_base_docs_campus"
-    eval_docs = BACKEND_DIR / "evals" / "docs"
+    eval_docs = root / "backend" / "evals" / "docs"
     files = sorted(list(campus.rglob("*.docx")) + list(eval_docs.glob("*.md")))
     seen: set[Path] = set()
     out = []
