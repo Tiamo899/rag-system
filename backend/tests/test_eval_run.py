@@ -87,9 +87,8 @@ def test_multi_turn_runs_turns_independently(monkeypatch, tmp_path):
 
 
 def test_judge_skipped_when_mock_provider(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        run_eval, "_judge_enabled", lambda: False
-    )
+    # 真实 provider 判定链路：conftest 强制 LLM_PROVIDER=mock → _judge_enabled() 必须 False
+    assert run_eval._judge_enabled() is False
     _patch_flow(monkeypatch, [(
         "答案", [{"doc_name": "国家助学金评审办法.docx"}])])
     report = asyncio.run(
