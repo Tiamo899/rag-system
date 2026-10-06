@@ -669,7 +669,24 @@ git commit -m "feat(chat): pass session history into RAG with prompt from prepar
 
 - [ ] **Step 1: 写失败测试**
 
-在 `backend/tests/test_eval_run.py` 文件末尾追加：
+**先同步修改既有的 `_patch_flow`**（新实现带 `history=` kwarg 调用，旧 fake 无此参会 TypeError；
+断言用的元组形态保持 `(question, kb_id)` 不变）：
+
+```python
+def _patch_flow(monkeypatch, answers_sources):
+    """answers_sources: list of (answer, sources) 按调用顺序返回。"""
+    calls = []
+
+    async def fake_flow(question, kb_id, history=None):
+        calls.append((question, kb_id))  # 既有断言依赖此元组形态
+        ans, src = answers_sources.pop(0)
+        return {"answer": ans, "sources": src}
+
+    monkeypatch.setattr(run_eval, "run_rag_flow", fake_flow)
+    return calls
+```
+
+**然后在文件末尾追加两个新测试：
 
 ```python
 def _multi_case():
@@ -751,7 +768,9 @@ async def run_multi_turn_cases(
         turn_rows = []
         case_history: list[dict] = []  # 每个 case 重置
         for t in c["turns"]:
-            history = case_history if mode == "history" else []
+            # 传快照而非活引用：防止累积追加污染调用前的历史、
+            # 也防止被调用方持有多条 turn 共享同一 list 对象
+            history = list(case_history) if mode == "history" else []
             try:
                 plan = await run_rag_flow(t["q"], kb_id, history=history)
                 answer, sources = plan["answer"], plan["sources"]
@@ -841,7 +860,7 @@ Expected: PASS（既有 6 项 + 新 2 项 = 8）
 - [ ] **Step 5: 全量回归后提交**
 
 Run: `cd backend && python -m pytest -q`
-Expected: 98 passed（96 + 2）, 55 warnings
+Expected: 98 passed（96 + 2）, 57 warnings（Task 3 后基线含 +2 条 jwt 环境警告）
 
 ```bash
 git add backend/evals/run_eval.py backend/tests/test_eval_run.py
