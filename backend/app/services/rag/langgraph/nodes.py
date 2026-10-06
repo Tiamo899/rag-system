@@ -73,8 +73,9 @@ def direct_node(state: RAGState) -> dict:
 
 
 async def retrieve_node(state: RAGState) -> dict:
+    query = state.get("standalone_query") or state["question"]  # 改写结果缺失时回退原问题
     chunks = await hybrid_search(
-        state["question"],
+        query,
         state.get("kb_id"),
         top_k=5,
         search_type="hybrid",
@@ -103,13 +104,14 @@ async def evaluate_node(state: RAGState) -> dict:
     chunks = state.get("retrieved_chunks") or []
     if not chunks:
         return {"has_relevant_content": False, "context": ""}
+    query = state.get("standalone_query") or state["question"]
     top_score = max(c["score"] for c in chunks)
     rrf_ok = top_score >= _settings.relevance_threshold
 
     cos_ok = False
     try:
         provider = get_embedding_provider()
-        query_vector = (await provider.embed_texts([state["question"]]))[0]
+        query_vector = (await provider.embed_texts([query]))[0]
         best_cos = max(
             _cosine(query_vector, c["content_vector"])
             for c in chunks
