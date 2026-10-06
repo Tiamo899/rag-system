@@ -138,6 +138,19 @@ async def send_message(
     session = await _get_session(db, session_id, user)
     kb_id = body.kb_id or session.kb_id
 
+    # 本轮之前的历史（近 3 轮 = 6 条）。必须在落库当前消息之前查询，
+    # 否则 history 会包含当前这条问题，改写拿到自指输入。
+    hist_res = await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session.id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(6)
+    )
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in reversed(hist_res.scalars().all())
+    ]
+
     # 先落库用户消息，并刷新会话时间戳（列表按活跃度排序）
     db.add(ChatMessage(session_id=session.id, role="user", content=body.content))
     session.updated_at = datetime.now(timezone.utc)
@@ -148,13 +161,15 @@ async def send_message(
         try:
             # 阶段 1：检索与评估
             yield {"event": "status", "data": json.dumps({"stage": "retrieving"})}
-            plan = await prepare_rag(body.content, str(kb_id) if kb_id else None)
+            plan = await prepare_rag(
+                body.content, str(kb_id) if kb_id else None, history=history
+            )
 
             if plan["mode"] == "generate":
-                # 阶段 2：真实 LLM 流式输出（逐 token）
+                # 阶段 2：真实 LLM 流式输出（逐 token）；prompt 已由 prepare_rag 统一构造
                 yield {"event": "status", "data": json.dumps({"stage": "thinking"})}
                 llm = get_llm_provider()
-                prompt = f"{plan['context']}\n\n问题：{plan['question']}"
+                prompt = plan["prompt"]
                 answer_parts: list[str] = []
                 async for token in llm.generate_stream(prompt):
                     answer_parts.append(token)
