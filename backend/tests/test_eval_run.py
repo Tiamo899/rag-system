@@ -21,8 +21,8 @@ def _patch_flow(monkeypatch, answers_sources):
     """answers_sources: list of (answer, sources) 按调用顺序返回。"""
     calls = []
 
-    async def fake_flow(question, kb_id):
-        calls.append((question, kb_id))
+    async def fake_flow(question, kb_id, history=None):
+        calls.append((question, kb_id))  # 既有断言依赖此元组形态
         ans, src = answers_sources.pop(0)
         return {"answer": ans, "sources": src}
 
@@ -141,3 +141,56 @@ def test_case_flow_error_recorded_and_run_continues(monkeypatch, tmp_path):
     # 速率只按成功 case 计，失败 case 被剔除
     assert report["hit_at3_rate"] == 1.0
     assert report["keyword_rate"] == 1.0
+
+
+def _multi_case():
+    return {
+        "id": "mt-x",
+        "turns": [
+            {"q": "转专业需要满足什么条件？",
+             "expect_docs": ["转专业实施办法.docx"], "expect_keywords": ["转专业"]},
+            {"q": "那具体要走什么流程？",
+             "expect_docs": ["转专业实施办法.docx"], "expect_keywords": ["流程"]},
+        ],
+    }
+
+
+def test_multi_turn_default_independent_no_history(monkeypatch, tmp_path):
+    """默认（不传 mode）= Phase 0 基线语义：每轮 history 为空，基线可复现。"""
+    calls = []
+
+    async def fake_flow(question, kb_id, history=None):
+        calls.append({"q": question, "history": history})
+        return {"answer": "答案含转专业与流程",
+                "sources": [{"doc_name": "转专业实施办法.docx"}]}
+
+    monkeypatch.setattr(run_eval, "run_rag_flow", fake_flow)
+    report = asyncio.run(
+        run_eval.run_multi_turn_cases([_multi_case()], kb_id="kb", use_judge=False,
+                                      results_dir=tmp_path, tag="t")
+    )
+    assert len(calls) == 2
+    assert all(not c["history"] for c in calls)   # 默认绝不携带历史
+    assert report["multi_turn_mode"] == "independent"
+
+
+def test_multi_turn_history_mode_passes_prior_turns(monkeypatch, tmp_path):
+    """history 模式：第 N 轮拿到前 N-1 轮的 user+assistant 消息。"""
+    calls = []
+
+    async def fake_flow(question, kb_id, history=None):
+        calls.append({"q": question, "history": history})
+        return {"answer": f"回答-{question[:2]}",
+                "sources": [{"doc_name": "转专业实施办法.docx"}]}
+
+    monkeypatch.setattr(run_eval, "run_rag_flow", fake_flow)
+    report = asyncio.run(
+        run_eval.run_multi_turn_cases([_multi_case()], kb_id="kb", use_judge=False,
+                                      results_dir=tmp_path, tag="t", mode="history")
+    )
+    assert calls[0]["history"] == []                       # 首轮无历史
+    h2 = calls[1]["history"]
+    assert [m["role"] for m in h2] == ["user", "assistant"]
+    assert h2[0]["content"] == "转专业需要满足什么条件？"
+    assert h2[1]["content"].startswith("回答-")
+    assert report["multi_turn_mode"] == "history"
