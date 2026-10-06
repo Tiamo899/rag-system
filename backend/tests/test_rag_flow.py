@@ -106,3 +106,31 @@ def test_prepare_rag_direct_path_skips_rewrite(monkeypatch):
     plan = asyncio.run(graph.prepare_rag("你好", None, history=[]))
     assert plan["mode"] == "direct"
     assert plan["prompt"] == ""
+
+
+def test_prepare_rag_kb_path_calls_rewrite_and_feeds_retrieve(monkeypatch):
+    """接线钉点：kb 分支必须执行 rewrite，且其输出进入检索 query。
+
+    mock 透传下 prompt 测不出 rewrite 是否被调用——直接桩掉 rewrite 返回
+    独立问题，用 nodes.hybrid_search 间谍验证检索拿到的正是它的输出。
+    """
+    from unittest.mock import AsyncMock
+
+    from app.services.rag.langgraph import nodes
+
+    monkeypatch.setattr(
+        graph, "rewrite_node",
+        AsyncMock(return_value={"standalone_query": "改写后独立问题"}),
+    )
+    seen = {}
+
+    async def spy(query, kb_id, top_k=5, search_type="hybrid"):
+        seen["query"] = query
+        return []
+
+    monkeypatch.setattr(nodes, "hybrid_search", spy)
+    plan = asyncio.run(
+        graph.prepare_rag("那这个呢？", None, history=[{"role": "user", "content": "上一问"}])
+    )
+    assert seen["query"] == "改写后独立问题"   # rewrite 被调用且输出进检索
+    assert plan["mode"] in ("fallback", "generate")  # 检索空 → fallback，流程不崩

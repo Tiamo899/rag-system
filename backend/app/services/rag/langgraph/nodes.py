@@ -1,4 +1,5 @@
 """LangGraph 节点实现：分析 / 直接回答(闲聊) / 检索 / 评估 / 生成 / 兜底。"""
+import logging
 from functools import partial
 
 from app.core.config import get_settings
@@ -10,6 +11,7 @@ from app.services.rag.langgraph.state import RAGState
 from app.services.search.hybrid import hybrid_search
 
 _settings = get_settings()
+logger = logging.getLogger(__name__)
 
 _GREETINGS = ("你好", "您好", "hi", "hello", "hey", "早上好", "下午好", "晚上好", "在吗", "你是谁")
 
@@ -53,6 +55,7 @@ async def rewrite_node(state: RAGState) -> dict:
         out = (out or "").strip()
         return {"standalone_query": out or question}
     except Exception:  # noqa: BLE001 —— fail-open，改写失败不打断主流程
+        logger.warning("rewrite_node failed, falling back to raw question", exc_info=True)
         return {"standalone_query": question}
 
 
