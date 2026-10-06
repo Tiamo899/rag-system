@@ -1,16 +1,62 @@
 """LangGraph 节点实现：分析 / 直接回答(闲聊) / 检索 / 评估 / 生成 / 兜底。"""
+import logging
 from functools import partial
 
 from app.core.config import get_settings
 from app.services.embedding.factory import get_embedding_provider
 from app.services.llm.base import BaseLLM
+from app.services.llm.factory import get_llm_provider
 from app.services.llm.mock import FALLBACK_TEXT
 from app.services.rag.langgraph.state import RAGState
 from app.services.search.hybrid import hybrid_search
 
 _settings = get_settings()
+logger = logging.getLogger(__name__)
 
 _GREETINGS = ("你好", "您好", "hi", "hello", "hey", "早上好", "下午好", "晚上好", "在吗", "你是谁")
+
+PROMPT_TRUNCATE = 300  # 进入改写/生成 prompt 的单条消息截断长度
+
+REWRITE_PROMPT = """结合对话历史，把用户最新问题改写成独立完整的问题（补全其中的指代与省略）。
+只输出改写后的问题，不要输出任何其他内容。
+
+对话历史：
+{history}
+
+最新问题：{question}"""
+
+
+def format_history(history: list) -> str:
+    """近 6 条（约 3 轮），单条截断 PROMPT_TRUNCATE 字符，'role: content' 每行一条。"""
+    return "\n".join(
+        f"{m.get('role', 'user')}: {(m.get('content') or '')[:PROMPT_TRUNCATE]}"
+        for m in (history or [])[-6:]
+    )
+
+
+async def rewrite_node(state: RAGState) -> dict:
+    """检索前把「历史 + 最新问题」改写为独立问题。
+
+    fail-open：无历史 / provider 非 openai（mock 透传）/ LLM 异常 / 空输出
+    → 一律返回原问题，绝不让改写挂掉聊天主流程。
+    """
+    question = state["question"]
+    history = state.get("history") or []
+    if not history:
+        return {"standalone_query": question}
+    if _settings.llm_provider != "openai":
+        return {"standalone_query": question}
+    try:
+        llm = get_llm_provider()
+        out = await llm.generate(
+            REWRITE_PROMPT.format(history=format_history(history), question=question),
+            temperature=0.0,
+        )
+        out = (out or "").strip()
+        return {"standalone_query": out or question}
+    except Exception:  # noqa: BLE001 —— fail-open，改写失败不打断主流程
+        logger.warning("rewrite_node failed, falling back to raw question", exc_info=True)
+        return {"standalone_query": question}
 
 
 def analyze_node(state: RAGState) -> dict:
@@ -30,8 +76,9 @@ def direct_node(state: RAGState) -> dict:
 
 
 async def retrieve_node(state: RAGState) -> dict:
+    query = state.get("standalone_query") or state["question"]  # 改写结果缺失时回退原问题
     chunks = await hybrid_search(
-        state["question"],
+        query,
         state.get("kb_id"),
         top_k=5,
         search_type="hybrid",
@@ -60,13 +107,14 @@ async def evaluate_node(state: RAGState) -> dict:
     chunks = state.get("retrieved_chunks") or []
     if not chunks:
         return {"has_relevant_content": False, "context": ""}
+    query = state.get("standalone_query") or state["question"]
     top_score = max(c["score"] for c in chunks)
     rrf_ok = top_score >= _settings.relevance_threshold
 
     cos_ok = False
     try:
         provider = get_embedding_provider()
-        query_vector = (await provider.embed_texts([state["question"]]))[0]
+        query_vector = (await provider.embed_texts([query]))[0]
         best_cos = max(
             _cosine(query_vector, c["content_vector"])
             for c in chunks

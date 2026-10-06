@@ -138,15 +138,21 @@ async def run_multi_turn_cases(
     use_judge: bool,
     results_dir: Path,
     tag: str,
+    mode: str = "independent",  # independent=Phase 0 基线语义 | history=传前轮
 ) -> dict:
-    """Phase 0 基线：每轮独立调用，不携带历史。Phase 1 计划将改为传历史。"""
+    """多轮跑分。independent：每轮独立、不带历史（基线可复现，保持默认）；
+    history：第 N 轮携带前 N-1 轮的 user/assistant 消息（Phase 1 验收用）。"""
     details = []
     hits, kws, judges = [], [], []
     for c in cases:
         turn_rows = []
+        case_history: list[dict] = []  # 每个 case 重置
         for t in c["turns"]:
+            # 传快照而非活引用：防止累积追加污染调用前的历史、
+            # 也防止被调用方持有多条 turn 共享同一 list 对象
+            history = list(case_history) if mode == "history" else []
             try:
-                plan = await run_rag_flow(t["q"], kb_id)
+                plan = await run_rag_flow(t["q"], kb_id, history=history)
                 answer, sources = plan["answer"], plan["sources"]
             except Exception as exc:  # 单轮失败不拖垮整轮次序列
                 hits.append(None)
@@ -190,12 +196,15 @@ async def run_multi_turn_cases(
             if err is not None:
                 row["error"] = err
             turn_rows.append(row)
+            case_history.append({"role": "user", "content": t["q"]})
+            case_history.append({"role": "assistant", "content": answer})
         details.append({"id": c["id"], "turns": turn_rows})
     report = {
         "tag": tag,
         "dataset": "multi_turn",
         "date": date.today().isoformat(),
         "kb_id": kb_id,
+        "multi_turn_mode": mode,
         "hit_at3_rate": _rate(hits),
         "keyword_rate": _rate(kws),
         "judge_rate": _rate(judges) if use_judge else None,
@@ -270,7 +279,8 @@ async def _amain(args: argparse.Namespace) -> None:
         cases = _load_cases(name)
         if name == "multi_turn":
             report = await run_multi_turn_cases(
-                cases, kb["id"], use_judge, results_dir, args.tag
+                cases, kb["id"], use_judge, results_dir, args.tag,
+                mode=args.multi_turn_mode,
             )
         else:
             report = await run_single_cases(
@@ -289,6 +299,9 @@ def main() -> None:
     parser.add_argument("--tag", required=True, help="baseline/phase1/phase2…")
     parser.add_argument("--dataset", default="all",
                         choices=("all",) + DATASETS)
+    parser.add_argument("--multi-turn-mode", default="independent",
+                        choices=("independent", "history"),
+                        help="多轮跑分是否携带前轮历史（默认 independent=基线语义）")
     parser.add_argument("--results-dir", default=str(DEFAULT_RESULTS_DIR))
     args = parser.parse_args()
     asyncio.run(_amain(args))

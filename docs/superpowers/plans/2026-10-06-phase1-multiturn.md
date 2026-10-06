@@ -65,26 +65,33 @@ import asyncio
 from app.services.rag.langgraph import nodes
 
 
-def _boom(*_a, **_k):
-    raise AssertionError("LLM must not be called in this path")
+from unittest.mock import Mock
 
 
 def test_rewrite_no_history_passthrough_without_llm_call(monkeypatch):
-    """首轮（无历史）零开销：绝不触碰 LLM。"""
-    monkeypatch.setattr(nodes, "get_llm_provider", _boom)
+    """首轮（无历史）零开销：绝不触碰 LLM。
+
+    用 Mock 调用计数断言（不能用抛 AssertionError 的 tripwire——
+    会被 fail-open 的 except Exception 吞掉造成假绿）。
+    """
+    spy = Mock(name="get_llm_provider")
+    monkeypatch.setattr(nodes, "get_llm_provider", spy)
     out = asyncio.run(nodes.rewrite_node({"question": "那这个呢？", "history": []}))
+    spy.assert_not_called()
     assert out == {"standalone_query": "那这个呢？"}
 
 
 def test_rewrite_mock_passthrough_no_llm_call(monkeypatch):
     """conftest 强制 LLM_PROVIDER=mock：透传，零 LLM 调用。"""
-    monkeypatch.setattr(nodes, "get_llm_provider", _boom)
+    spy = Mock(name="get_llm_provider")
+    monkeypatch.setattr(nodes, "get_llm_provider", spy)
     assert nodes._settings.llm_provider == "mock"  # 环境前提
     out = asyncio.run(nodes.rewrite_node({
         "question": "那这个呢？",
         "history": [{"role": "user", "content": "转专业条件？"},
                     {"role": "assistant", "content": "前20%"}],
     }))
+    spy.assert_not_called()
     assert out == {"standalone_query": "那这个呢？"}
 
 
@@ -662,7 +669,24 @@ git commit -m "feat(chat): pass session history into RAG with prompt from prepar
 
 - [ ] **Step 1: 写失败测试**
 
-在 `backend/tests/test_eval_run.py` 文件末尾追加：
+**先同步修改既有的 `_patch_flow`**（新实现带 `history=` kwarg 调用，旧 fake 无此参会 TypeError；
+断言用的元组形态保持 `(question, kb_id)` 不变）：
+
+```python
+def _patch_flow(monkeypatch, answers_sources):
+    """answers_sources: list of (answer, sources) 按调用顺序返回。"""
+    calls = []
+
+    async def fake_flow(question, kb_id, history=None):
+        calls.append((question, kb_id))  # 既有断言依赖此元组形态
+        ans, src = answers_sources.pop(0)
+        return {"answer": ans, "sources": src}
+
+    monkeypatch.setattr(run_eval, "run_rag_flow", fake_flow)
+    return calls
+```
+
+**然后在文件末尾追加两个新测试：
 
 ```python
 def _multi_case():
@@ -744,7 +768,9 @@ async def run_multi_turn_cases(
         turn_rows = []
         case_history: list[dict] = []  # 每个 case 重置
         for t in c["turns"]:
-            history = case_history if mode == "history" else []
+            # 传快照而非活引用：防止累积追加污染调用前的历史、
+            # 也防止被调用方持有多条 turn 共享同一 list 对象
+            history = list(case_history) if mode == "history" else []
             try:
                 plan = await run_rag_flow(t["q"], kb_id, history=history)
                 answer, sources = plan["answer"], plan["sources"]
@@ -834,7 +860,7 @@ Expected: PASS（既有 6 项 + 新 2 项 = 8）
 - [ ] **Step 5: 全量回归后提交**
 
 Run: `cd backend && python -m pytest -q`
-Expected: 98 passed（96 + 2）, 55 warnings
+Expected: 98 passed（96 + 2）, 57 warnings（Task 3 后基线含 +2 条 jwt 环境警告）
 
 ```bash
 git add backend/evals/run_eval.py backend/tests/test_eval_run.py

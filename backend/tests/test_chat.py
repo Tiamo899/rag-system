@@ -244,3 +244,49 @@ def test_update_session_title(client, admin_headers, prepared_kb):
     assert r.json()["title"] == "报销单问题"
     detail = client.get(f"/api/v1/chat/sessions/{sess['id']}", headers=admin_headers).json()
     assert detail["session"]["title"] == "报销单问题"
+
+
+def test_chat_history_excludes_current_message(client, admin_headers, prepared_kb, monkeypatch):
+    """history 只含本轮之前的消息：第一轮为空，第二轮恰为上一轮 user+assistant，
+    绝不包含当前这条问题（否则改写拿到自指输入）。"""
+    import app.api.v1.chat as chat_mod
+
+    captured = []
+
+    async def spy(question, kb_id, history=None):
+        captured.append({"q": question, "history": history})
+        return {"mode": "direct", "answer": "收到", "sources": [],
+                "question": question, "prompt": ""}
+
+    monkeypatch.setattr(chat_mod, "prepare_rag", spy)
+
+    sess = client.post(
+        "/api/v1/chat/sessions",
+        json={"title": "历史传递", "kb_id": prepared_kb},
+        headers=admin_headers,
+    ).json()
+
+    _send(client, admin_headers, sess["id"], "第一问")
+    assert captured[0]["history"] == []          # 首轮无历史
+
+    _send(client, admin_headers, sess["id"], "那这个呢？")
+    h = captured[1]["history"]
+    assert [m["role"] for m in h] == ["user", "assistant"]
+    assert h[0]["content"] == "第一问"            # 上一轮问题
+    assert h[1]["content"] == "收到"              # 上一轮回答（spy 的 direct 答案已落库）
+    assert all(m["content"] != "那这个呢？" for m in h)  # 当前消息不在 history 里
+
+
+def test_chat_sse_shape_unchanged_with_history(client, admin_headers, prepared_kb):
+    """有历史的第二轮 SSE 帧序仍为 start/token/done——协议零改动。"""
+    sess = client.post(
+        "/api/v1/chat/sessions",
+        json={"title": "协议回归", "kb_id": prepared_kb},
+        headers=admin_headers,
+    ).json()
+    _send(client, admin_headers, sess["id"], "FastAPI 是什么框架？")  # 真实流程，产生历史
+    events = _send(client, admin_headers, sess["id"], "那它是用来做什么的？")
+    names = [e["event"] for e in events]
+    assert names[0] == "start"
+    assert "token" in names and "done" in names
+    assert "error" not in names, [e for e in events if e["event"] == "error"]
