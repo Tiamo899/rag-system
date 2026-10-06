@@ -5,6 +5,8 @@ from typing import Optional, TypedDict
 class RAGState(TypedDict, total=False):
     question: str                  # 用户问题
     kb_id: Optional[str]           # 目标知识库（None=全库）
+    history: list                  # 本轮之前的对话历史 [{role, content}]，最多 6 条
+    standalone_query: str          # 改写后的独立问题（无历史/失败时 = question）
     is_kb_query: bool              # 分析节点：是否为知识库查询
     retrieved_chunks: list         # 检索到的分块
     has_relevant_content: bool     # 评估节点：是否有关联内容
