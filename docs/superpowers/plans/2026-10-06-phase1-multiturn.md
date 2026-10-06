@@ -65,26 +65,33 @@ import asyncio
 from app.services.rag.langgraph import nodes
 
 
-def _boom(*_a, **_k):
-    raise AssertionError("LLM must not be called in this path")
+from unittest.mock import Mock
 
 
 def test_rewrite_no_history_passthrough_without_llm_call(monkeypatch):
-    """首轮（无历史）零开销：绝不触碰 LLM。"""
-    monkeypatch.setattr(nodes, "get_llm_provider", _boom)
+    """首轮（无历史）零开销：绝不触碰 LLM。
+
+    用 Mock 调用计数断言（不能用抛 AssertionError 的 tripwire——
+    会被 fail-open 的 except Exception 吞掉造成假绿）。
+    """
+    spy = Mock(name="get_llm_provider")
+    monkeypatch.setattr(nodes, "get_llm_provider", spy)
     out = asyncio.run(nodes.rewrite_node({"question": "那这个呢？", "history": []}))
+    spy.assert_not_called()
     assert out == {"standalone_query": "那这个呢？"}
 
 
 def test_rewrite_mock_passthrough_no_llm_call(monkeypatch):
     """conftest 强制 LLM_PROVIDER=mock：透传，零 LLM 调用。"""
-    monkeypatch.setattr(nodes, "get_llm_provider", _boom)
+    spy = Mock(name="get_llm_provider")
+    monkeypatch.setattr(nodes, "get_llm_provider", spy)
     assert nodes._settings.llm_provider == "mock"  # 环境前提
     out = asyncio.run(nodes.rewrite_node({
         "question": "那这个呢？",
         "history": [{"role": "user", "content": "转专业条件？"},
                     {"role": "assistant", "content": "前20%"}],
     }))
+    spy.assert_not_called()
     assert out == {"standalone_query": "那这个呢？"}
 
 
