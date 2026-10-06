@@ -36,7 +36,7 @@ python -m evals.run_eval --tag phase1 --dataset multi_turn   # 单数据集
 ## 阶段对比
 
 - 基线：`--tag baseline`
-- Phase 1 后：`--tag phase1 --multi-turn-mode history`（对比 `multi_turn` 的 **judge_rate**——基线 50%；Hit@3/关键词已饱和，仅作回归护栏不得下降）
+- Phase 1 后：`--tag phase1 --multi-turn-mode history`（对比 `multi_turn`：judge 50%→66.67%、keyword 100%→83.33%、Hit@3 持平 100%。keyword 破位为 mt-03 歧义指代消解失败，根因见对应结果 md 的「回归分析」注记——judge 与 keyword 两面并呈，不得只报提升）
 - Phase 2 后：`--tag phase2`（对比 `governance`，旧版数字命中应归零）
 
 对比 = 直接看两份 md 报告，或 `git diff` results 目录。
