@@ -31,11 +31,12 @@ python -m evals.run_eval --tag phase1 --dataset multi_turn   # 单数据集
 | Hit@3 | top-3 来源命中期望文档 |
 | 关键词 | 答案含任一 expect_keywords 且不含任何 forbidden_keywords；`expect_keywords` 为空的轮次恒判负（数据设计如此） |
 | 裁判 | LLM 按参考要点打 0/1；mock provider 或该轮 `expect_keywords` 为空（无参考要点可对）时为 null |
+| 多轮模式 | `--multi-turn-mode` 默认 `independent`（=基线语义，不带历史）；`history` 显式开启，第 N 轮携带前 N-1 轮消息 |
 
 ## 阶段对比
 
 - 基线：`--tag baseline`
-- Phase 1 后：`--tag phase1`（对比 `multi_turn` 的 Hit@3）
+- Phase 1 后：`--tag phase1 --multi-turn-mode history`（对比 `multi_turn` 的 **judge_rate**——基线 50%；Hit@3/关键词已饱和，仅作回归护栏不得下降）
 - Phase 2 后：`--tag phase2`（对比 `governance`，旧版数字命中应归零）
 
 对比 = 直接看两份 md 报告，或 `git diff` results 目录。
