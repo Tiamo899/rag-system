@@ -1,10 +1,11 @@
 """文档接口：上传 / 列表 / 详情 / 分块预览 / 删除。"""
 import asyncio
 import uuid
+from datetime import date
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,6 +33,10 @@ async def _get_doc(db: AsyncSession, doc_id: uuid.UUID) -> Document:
 async def upload_document(
     kb_id: uuid.UUID,
     file: UploadFile = File(...),
+    version_no: str | None = Form(None),
+    valid_from: date | None = Form(None),
+    valid_to: date | None = Form(None),
+    supersedes_doc_id: uuid.UUID | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("doc:upload")),
 ) -> Document:
@@ -59,6 +64,10 @@ async def upload_document(
         file_size=len(data),
         created_by=user.id,
         status="pending",
+        version_no=version_no,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        supersedes_doc_id=supersedes_doc_id,
     )
     db.add(doc)
     await db.commit()
