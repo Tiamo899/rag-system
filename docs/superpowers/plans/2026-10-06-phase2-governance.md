@@ -245,7 +245,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 async def upload_document(
     kb_id: uuid.UUID,
     file: UploadFile = File(...),
-    version_no: str | None = Form(None),
+    version_no: str | None = Form(None, max_length=50),
     valid_from: date | None = Form(None),
     valid_to: date | None = Form(None),
     supersedes_doc_id: uuid.UUID | None = Form(None),
