@@ -103,6 +103,14 @@ docker compose build   # 重新构建 backend/frontend 镜像
 docker compose up -d   # 滚动更新，迁移由 entrypoint 自动执行
 ```
 
+**升级到知识库治理版本后必跑一次时效回填**（存量文档缺 ES 时效字段，不回填会被严格过滤排除、检索结果为空；脚本幂等可重复执行，第二跑输出 `updated: 0`）：
+
+```bash
+docker compose exec backend python -m scripts.backfill_validity
+```
+
+本地开发（非容器）在 backend/ 下执行 `python -m scripts.backfill_validity`。
+
 ## ES 注意事项（Windows + Docker Desktop）
 
 - ES 容器启动即退出报 `vm.max_map_count [65530] is too low`：编辑 `C:\Users\<你>\.wslconfig`：

@@ -1,5 +1,6 @@
 """文档接口：上传 / 列表 / 详情 / 分块预览 / 删除。"""
 import asyncio
+import logging
 import uuid
 from datetime import date
 from pathlib import Path
@@ -20,6 +21,7 @@ from app.services.document_parser.factory import file_type_from_name, get_parser
 from app.services.vectorizer import trigger_vectorization
 
 router = APIRouter(tags=["documents"])
+logger = logging.getLogger(__name__)
 
 
 async def _get_doc(db: AsyncSession, doc_id: uuid.UUID) -> Document:
@@ -206,19 +208,23 @@ async def _sync_es_metadata(doc: Document) -> None:
         "version_no": doc.version_no,
     }
     es = get_es()
-    await es.update_by_query(
-        index=get_settings().es_index,
-        query={"term": {"doc_id": str(doc.id)}},
-        script={
-            "source": (
-                "ctx._source.metadata.valid_from = params.valid_from;"
-                "ctx._source.metadata.valid_to = params.valid_to;"
-                "ctx._source.metadata.version_no = params.version_no"
-            ),
-            "params": params,
-        },
-        refresh=True,
-    )
+    try:
+        await es.update_by_query(
+            index=get_settings().es_index,
+            query={"term": {"doc_id": str(doc.id)}},
+            script={
+                "source": (
+                    "ctx._source.metadata.valid_from = params.valid_from;"
+                    "ctx._source.metadata.valid_to = params.valid_to;"
+                    "ctx._source.metadata.version_no = params.version_no"
+                ),
+                "params": params,
+            },
+            refresh=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # PG 已 commit，时效以 PG 为准；ES 同步失败只告警，re-PUT 可重试
+        logger.warning("doc %s ES metadata sync failed: %s", doc.id, exc, exc_info=True)
 
 
 @router.delete("/docs/{doc_id}", status_code=204)

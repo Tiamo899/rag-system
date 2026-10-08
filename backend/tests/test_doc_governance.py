@@ -240,6 +240,7 @@ def test_supersede_purges_old_chunks_from_es_and_pg(client, admin_headers):
 
         old = client.get(f"/api/v1/docs/{old_id}", headers=admin_headers).json()
         assert old["superseded_by"] == new_id, "旧文档应标记废止"
+        assert old["chunk_count"] == 0, "替换后旧文档分块计数应归零"
         # 文档行保留（PG 历史）——经由详情端点可访问
         assert client.get(f"/api/v1/docs/{old_id}", headers=admin_headers).status_code == 200
         # （PG 分块清除不直接断言：同步测试里 asyncio.run 直连模块级引擎

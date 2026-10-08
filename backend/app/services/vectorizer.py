@@ -61,6 +61,7 @@ async def _apply_supersede(db, new_doc: Document) -> None:
     # 2) PG 分块级联删 + 标记废止（同一事务）
     await db.execute(delete(DocumentChunk).where(DocumentChunk.doc_id == old.id))
     old.superseded_by = new_doc.id
+    old.chunk_count = 0
     await db.commit()
 
 
