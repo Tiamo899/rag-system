@@ -1567,7 +1567,7 @@ Card extra（Search Input 之前）：
                 <Switch
                   size="small"
                   checked={activeOnly}
-                  onChange={(v) => { setActiveOnly(v); if (selectedKbId) loadDocs(selectedKbId, search || undefined, v) }}
+                  onChange={setActiveOnly}  {/* 状态变更由 useEffect [selectedKbId, activeOnly] 统一触发加载，避免双请求 */}
                 />
                 <Typography.Text type="secondary">只看现行</Typography.Text>
               </Space>
