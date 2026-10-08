@@ -82,3 +82,18 @@ def test_upload_with_version_fields_persists(client, admin_headers):
         assert got["superseded_by"] is None
     finally:
         client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
+
+
+def test_upload_version_no_too_long_422(client, admin_headers):
+    """超长 version_no 被 422 拒绝，不落库不 500。"""
+    kb_id = _mk_kb(client, admin_headers, "版本号边界测试库")
+    try:
+        r = client.post(
+            f"/api/v1/knowledge-bases/{kb_id}/docs",
+            headers=admin_headers,
+            data={"version_no": "x" * 51},
+            files={"file": ("b.md", "# b\n版本边界土人参".encode(), "text/markdown")},
+        )
+        assert r.status_code == 422, r.status_code
+    finally:
+        client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
