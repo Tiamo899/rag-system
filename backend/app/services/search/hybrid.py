@@ -1,4 +1,6 @@
 """混合检索：向量(knn) + 关键词(BM25)，应用层 RRF 融合（k=60）。"""
+from datetime import date
+
 from app.core.config import get_settings
 from app.core.elasticsearch import get_es
 from app.services.embedding.factory import get_embedding_provider
@@ -36,6 +38,15 @@ def _kb_filter(kb_id: str | None) -> dict | None:
     return {"term": {"kb_id": kb_id}} if kb_id else None
 
 
+def build_validity_filters(today: str | None = None) -> list[dict]:
+    """时效过滤（严格语义：缺字段即不命中）。存量数据须先跑回填脚本。"""
+    day = today or date.today().isoformat()
+    return [
+        {"range": {"metadata.valid_from": {"lte": day}}},
+        {"range": {"metadata.valid_to": {"gte": day}}},
+    ]
+
+
 async def hybrid_search(
     query: str,
     kb_id: str | None,
@@ -51,6 +62,7 @@ async def hybrid_search(
     result_map: dict[str, dict] = {}
 
     kb_f = _kb_filter(kb_id)  # kb_id=None 时为 None，此时不传 filter 键
+    validity_f = build_validity_filters()
 
     if search_type in ("hybrid", "vector"):
         query_vector = (await provider.embed_texts([query]))[0]
@@ -60,8 +72,9 @@ async def hybrid_search(
             "k": top_k,
             "num_candidates": top_k * 10,
         }
-        if kb_f:
-            knn["filter"] = kb_f  # ES knn 不接受 filter: null，全库检索时不传
+        # ES knn 不接受 filter: null；validity_f 恒存在，故 filter 键恒有值
+        knn_filter = {"bool": {"filter": ([kb_f] if kb_f else []) + validity_f}}
+        knn["filter"] = knn_filter
         resp = await es.search(index=index, knn=knn)
         ids: list[str] = []
         for hit in resp["hits"]["hits"]:
@@ -72,8 +85,7 @@ async def hybrid_search(
 
     if search_type in ("hybrid", "keyword"):
         bool_q: dict = {"must": {"match": {"content": query}}}
-        if kb_f:
-            bool_q["filter"] = kb_f
+        bool_q["filter"] = ([kb_f] if kb_f else []) + validity_f
         resp = await es.search(index=index, size=top_k, query={"bool": bool_q})
         ids = []
         for hit in resp["hits"]["hits"]:

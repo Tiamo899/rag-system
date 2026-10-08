@@ -6,7 +6,7 @@ MVP 用 asyncio.create_task（重启丢失，文档停在 processing，可手动
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import delete
 
@@ -111,6 +111,10 @@ async def _do_vectorize(db, doc: Document) -> None:
                     "chunk_index": i,
                     "kb_name": kb.name,
                     "title": title,
+                    # 时效默认值：缺省 = 上传日 / 永久（与回填脚本同一契约）
+                    "valid_from": (doc.valid_from or doc.created_at.date()).isoformat(),
+                    "valid_to": (doc.valid_to or date(9999, 12, 31)).isoformat(),
+                    "version_no": doc.version_no,
                 },
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
