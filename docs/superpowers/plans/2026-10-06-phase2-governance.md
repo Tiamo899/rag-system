@@ -1262,20 +1262,61 @@ MULTI_SOURCE_NOTICE = (
     valid_to: str | None = None
 ```
 
+- [ ] **Step 3b: Mock 行头契约适配（机制三在 mock provider 下必须可用）**
+
+`backend/app/services/llm/mock.py` 两处：
+
+1. 行头正则放宽为**可选 meta 段**（原：`》` 后紧跟冒号；新：允许 `》（…）：`）：
+```python
+_HEADER_RE = r"^\[\d+\]\s*《([^》]*)》(?:（[^）]*）)?[：:]\s?(.*)$"
+```
+2. `_parse_blocks` 逐行循环中，在行头匹配判断**之前**跳过提示行：
+```python
+            if line.startswith("[提示]"):
+                continue  # 冲突提示行不是块头也不是引用内容，不进 mock 回答
+```
+（按 mock.py 实际循环结构落位——`line.startswith` 判断放在 `re.match(_HEADER_RE, line)` 之前即可。）
+
+同步文案两处：mock.py 模块 docstring 中的行头示例、`openai_adapter.py` 内 prompt 说明（`[n] 《资料标题》：内容` → `[n] 《资料标题》（可选版本/生效标注）：内容`）。
+
+追加测试到 `backend/tests/test_governance_prompt.py`：
+
+```python
+def test_mock_parses_meta_header_and_skips_notice():
+    """机制三兼容 mock provider：标注行按块头解析、提示行不进回答。"""
+    import asyncio as _a
+
+    from app.services.llm.mock import MockLLM
+
+    prompt = (
+        "[1] 《学籍管理规定》（2023 版，生效2023-09-01）：旧规内容\n"
+        "[2] 《B办法》：乙规定\n"
+        "\n[提示] 以上资料来自多份文档，若规定不一致，请指出差异并以生效日期较新者为准。"
+        "\n\n问题：测试问题"
+    )
+    answer = _a.run(MockLLM().generate(prompt))
+    assert "[提示]" not in answer, "提示行不应被 mock 引用进回答"
+    assert "（2023 版，生效2023-09-01）" not in answer, "原始标注行不应被当正文引用"
+    assert "学籍管理规定" in answer, "标注后的标题应仍被识别为块头"
+```
+
+（若 `MockLLM().generate` 的既有签名/输出形状与上述断言冲突，以真实实现调整断言——但三条语义必须保住：提示行不进回答、标注行不被当正文、标题仍识别。）
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && python -m pytest tests/test_governance_prompt.py -v`
-Expected: PASS（4 项全绿）
+Expected: PASS（5 项全绿）
 
 - [ ] **Step 5: 全量回归后提交（注意既有 prompt 断言）**
 
 Run: `cd backend && python -m pytest -q`
-Expected: 114 passed（110 + 4）, 57 warnings
+Expected: 117 passed（116 + 1 mock 兼容测试）；warnings 实报（基线 71）
 （若 `test_run_rag_flow_prompt_contains_history` 或 `test_chat` 中断言受影响立即报告——它们的 fake chunks 不带 version/valid 字段，输出格式不变，理论上全绿）
 
 ```bash
 git add backend/app/services/rag/langgraph/nodes.py backend/app/services/search/hybrid.py \
-        backend/app/schemas/document.py backend/tests/test_governance_prompt.py
+        backend/app/schemas/document.py backend/app/services/llm/mock.py \
+        backend/app/services/llm/openai_adapter.py backend/tests/test_governance_prompt.py
 git commit -m "feat(rag): version/validity in context and multi-source conflict notice"
 ```
 
