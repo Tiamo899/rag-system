@@ -84,6 +84,7 @@ export default function KnowledgeBase() {
     valid_from: undefined as dayjs.Dayjs | undefined,
     valid_to: undefined as dayjs.Dayjs | undefined,
   })
+  const [versionSubmitting, setVersionSubmitting] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm()
@@ -182,6 +183,7 @@ export default function KnowledgeBase() {
   }
 
   const handleVersionOk = async () => {
+    if (versionSubmitting) return  // in-flight 防重：双击不产生第二次上传
     const { file, existing } = versionModal
     if (!file || !selectedKbId) {
       setVersionModal({ open: false, file: null, existing: null })
@@ -193,7 +195,12 @@ export default function KnowledgeBase() {
       valid_to: versionForm.valid_to ? versionForm.valid_to.format('YYYY-MM-DD') : undefined,
       supersedes_doc_id: versionForm.replace && existing ? existing.id : undefined,
     }
-    await doUpload(file, opts)
+    setVersionSubmitting(true)
+    try {
+      await doUpload(file, opts)
+    } finally {
+      setVersionSubmitting(false)
+    }
     setVersionModal({ open: false, file: null, existing: null })
     setVersionForm({ replace: true, version_no: '', valid_from: undefined, valid_to: undefined })
   }
@@ -419,6 +426,7 @@ export default function KnowledgeBase() {
         onOk={handleVersionOk}
         onCancel={() => setVersionModal({ open: false, file: null, existing: null })}
         okText="上传"
+        confirmLoading={versionSubmitting}
       >
         <Form layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item>
