@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentOut(BaseModel):
@@ -22,6 +22,12 @@ class DocumentOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DocumentUpdate(BaseModel):
+    valid_from: date | None = None
+    valid_to: date | None = None
+    version_no: str | None = Field(default=None, max_length=50)
 
 
 class DocumentChunkOut(BaseModel):

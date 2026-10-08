@@ -14,7 +14,7 @@ from app.core.deps import require_permission
 from app.core.exceptions import AppError, NotFoundError
 from app.db.session import get_db
 from app.models import Document, KnowledgeBase, User
-from app.schemas.document import DocumentChunkOut, DocumentOut
+from app.schemas.document import DocumentChunkOut, DocumentOut, DocumentUpdate
 from app.services.chunking.splitter import derive_title, split_text
 from app.services.document_parser.factory import file_type_from_name, get_parser
 from app.services.vectorizer import trigger_vectorization
@@ -151,6 +151,60 @@ async def preview_chunks(
         )
         for i, c in enumerate(chunks)
     ]
+
+
+@router.put("/docs/{doc_id}", response_model=DocumentOut)
+async def update_document(
+    doc_id: uuid.UUID,
+    body: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_permission("doc:update")),
+):
+    """更新时效/版本字段（局部）。更新后同步 ES metadata，零重新向量化。"""
+    doc = await _get_doc(db, doc_id)
+    # 区间校验按「合并后的生效值」算——只改一个字段也必须拦截坏区间
+    new_from = body.valid_from if "valid_from" in body.model_fields_set else doc.valid_from
+    new_to = body.valid_to if "valid_to" in body.model_fields_set else doc.valid_to
+    if new_from is not None and new_to is not None and new_from > new_to:
+        raise AppError("生效日期不能晚于失效日期", code="INVALID_DATE_RANGE", status_code=400)
+
+    changed = {}
+    for field in ("valid_from", "valid_to", "version_no"):
+        if field in body.model_fields_set:
+            setattr(doc, field, getattr(body, field))
+            changed[field] = getattr(body, field)
+    await db.commit()
+    await db.refresh(doc)
+
+    if changed:
+        await _sync_es_metadata(doc)
+    return doc
+
+
+async def _sync_es_metadata(doc: Document) -> None:
+    """把文档当前时效刷进 ES metadata（update_by_query，零 embedding）。幂等。"""
+    from app.core.elasticsearch import get_es
+    from app.core.config import get_settings
+
+    params = {
+        "valid_from": (doc.valid_from or (doc.created_at.date() if doc.created_at else date.today())).isoformat(),
+        "valid_to": (doc.valid_to or date(9999, 12, 31)).isoformat(),
+        "version_no": doc.version_no,
+    }
+    es = get_es()
+    await es.update_by_query(
+        index=get_settings().es_index,
+        query={"term": {"doc_id": str(doc.id)}},
+        script={
+            "source": (
+                "ctx._source.metadata.valid_from = params.valid_from;"
+                "ctx._source.metadata.valid_to = params.valid_to;"
+                "ctx._source.metadata.version_no = params.version_no"
+            ),
+            "params": params,
+        },
+        refresh=True,
+    )
 
 
 @router.delete("/docs/{doc_id}", status_code=204)
