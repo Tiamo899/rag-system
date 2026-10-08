@@ -899,7 +899,7 @@ git commit -m "feat(docs): PUT validity/version update with ES metadata sync"
 
 **Interfaces:**
 - Consumes: Task 1 的 `supersedes_doc_id`；Task 2 的 ES 清除能力（`delete_by_query` 模式与既有 delete_document 相同）
-- Produces: 替换应用函数 `_apply_supersede(db, new_doc) -> bool`（vectorizer 内部）；上传时目标校验 400 语义
+- Produces: 替换应用函数 `_apply_supersede(db, new_doc) -> None`（vectorizer 内部函数，无外部消费者，失败路径直接 return 不标记）；上传时目标校验 400 语义
 
 - [ ] **Step 1: 写失败测试**
 
