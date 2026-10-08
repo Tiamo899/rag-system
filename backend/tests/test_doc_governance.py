@@ -289,6 +289,38 @@ def test_supersede_not_applied_when_vectorize_fails(client, admin_headers):
         client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
 
 
+def test_list_active_only_filter(client, admin_headers):
+    """active_only=true 只返回现行文档（经真实替换流程造废止态，全 HTTP）。"""
+    kb_id = _mk_kb(client, admin_headers, "只看现行测试库")
+    try:
+        a = _upload_and_vectorize_doc(
+            client, admin_headers, kb_id, "a.md", "# a\n只看现行甲"
+        )
+        b_up = client.post(
+            f"/api/v1/knowledge-bases/{kb_id}/docs",
+            headers=admin_headers,
+            data={"supersedes_doc_id": a},
+            files={"file": ("b.md", "# b\n只看现行乙".encode(), "text/markdown")},
+        ).json()
+        client.post(f"/api/v1/docs/{b_up['id']}/vectorize", headers=admin_headers)
+        assert _wait(client, admin_headers, b_up["id"]) == "completed"
+        b = b_up["id"]
+
+        all_docs = client.get(
+            f"/api/v1/knowledge-bases/{kb_id}/docs", headers=admin_headers
+        ).json()
+        active = client.get(
+            f"/api/v1/knowledge-bases/{kb_id}/docs",
+            params={"active_only": True}, headers=admin_headers,
+        ).json()
+        ids_all = {d["id"] for d in all_docs}
+        ids_active = {d["id"] for d in active}
+        assert a in ids_all and b in ids_all          # 默认列表两个都展示
+        assert a not in ids_active and b in ids_active  # active_only 隐藏已废止的 a
+    finally:
+        client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
+
+
 def test_upload_rejects_invalid_supersedes_target(client, admin_headers):
     """替换目标必须存在、同库且现行——400，不能带病入库。"""
     kb_a = _mk_kb(client, admin_headers, "替换校验库A")

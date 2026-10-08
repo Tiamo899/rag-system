@@ -100,12 +100,15 @@ async def upload_document(
 async def list_documents(
     kb_id: uuid.UUID,
     search: str | None = Query(default=None),
+    active_only: bool = Query(default=False, description="只看现行文档（superseded_by 为空）"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_permission("doc:read")),
 ):
     q = select(Document).where(Document.kb_id == kb_id)
+    if active_only:
+        q = q.where(Document.superseded_by.is_(None))
     if search:
         q = q.where(Document.original_name.ilike(f"%{search}%"))
     q = q.order_by(Document.created_at.desc())
