@@ -1,0 +1,35 @@
+{
+  "tag": "phase2",
+  "dataset": "governance",
+  "date": "2026-10-08",
+  "kb_id": "2f7bc390-7395-4ea9-bd1e-f34e03e55b53",
+  "hit_at3_rate": 1.0,
+  "keyword_rate": 0.5,
+  "judge_rate": 0.5,
+  "cases": [
+    {
+      "id": "gv-01",
+      "hit_at3": true,
+      "keyword": true,
+      "judge": 1,
+      "sources": [
+        "请假管理办法_2024版.md",
+        "请假管理办法_2024版.md",
+        "学生考勤与请假管理办法.docx"
+      ],
+      "answer": "每学期累计请假不得超过5天 [1]。"
+    },
+    {
+      "id": "gv-02",
+      "hit_at3": true,
+      "keyword": false,
+      "judge": 0,
+      "sources": [
+        "请假管理办法_2024版.md",
+        "学生考勤与请假管理办法.docx",
+        "请假管理办法_2024版.md"
+      ],
+      "answer": "请假超过3天但不超过7天需要学院（系）审批 [2]。"
+    }
+  ]
+}
