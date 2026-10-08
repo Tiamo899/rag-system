@@ -1523,6 +1523,7 @@ import dayjs from 'dayjs'
   }
 
   const handleVersionOk = async () => {
+    if (versionSubmitting) return  // in-flight 防重：双击不产生第二次上传
     const { file, existing } = versionModal
     if (!file || !selectedKbId) { setVersionModal({ open: false, file: null, existing: null }); return }
     const opts: UploadDocOptions = {
@@ -1531,13 +1532,29 @@ import dayjs from 'dayjs'
       valid_to: versionForm.valid_to ? versionForm.valid_to.format('YYYY-MM-DD') : undefined,
       supersedes_doc_id: versionForm.replace && existing ? existing.id : undefined,
     }
-    await doUpload(file, opts)
+    setVersionSubmitting(true)
+    try {
+      await doUpload(file, opts)
+    } finally {
+      setVersionSubmitting(false)
+    }
     setVersionModal({ open: false, file: null, existing: null })
     setVersionForm({ replace: true, version_no: '', valid_from: undefined, valid_to: undefined })
   }
 ```
 
-（`UploadDocOptions` 需从 `../api/kb` import。`handleUpload` 原 body 删除。）
+（`UploadDocOptions` 需从 `../api/kb` import。`handleUpload` 原 body 删除。
+配套 state——加在 `versionForm` 的 useState 之后：）
+
+```ts
+  const [versionSubmitting, setVersionSubmitting] = useState(false)
+```
+
+Modal 上绑定（防双击产生重复文档——替换废止发生在向量化成功时，in-flight 期间两次上传都会 201）：
+
+```tsx
+        confirmLoading={versionSubmitting}
+```
 
 **c) 表格列与开关**（`columns` 的「状态」列后插「效力」列；Card extra 的 Upload 按钮前插 Switch）：
 
