@@ -246,11 +246,12 @@ export default function Chat() {
   }
 
   return (
-    <Row gutter={16} style={{ height: 'calc(100vh - 150px)' }}>
+    <Row gutter={16} style={{ height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
       <Col span={5}>
         <Card
           title="会话"
           size="small"
+          style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
           extra={
             <Space>
               {multiSelect ? (
@@ -273,7 +274,7 @@ export default function Chat() {
               </Button>
             </Space>
           }
-          bodyStyle={{ padding: 0 }}
+          bodyStyle={{ padding: 0, flex: 1, minHeight: 0, overflow: 'hidden' }}
         >
           {multiSelect && (
             <div
@@ -305,7 +306,7 @@ export default function Chat() {
           )}
           <List
             dataSource={sessions}
-            style={{ maxHeight: multiSelect ? '66vh' : '72vh', overflow: 'auto' }}
+            style={{ flex: 1, minHeight: 0, overflow: 'auto' }}
             locale={{ emptyText: <Empty description="暂无会话" /> }}
             renderItem={(s) => (
               <List.Item
@@ -355,7 +356,7 @@ export default function Chat() {
         <Card
           size="small"
           style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 12 }}
+          bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 12, minHeight: 0 }}
           title={
             <Space>
               <span>{current?.title ?? '智能问答'}</span>
@@ -370,7 +371,7 @@ export default function Chat() {
             </Space>
           }
         >
-          <div ref={scrollRef} style={{ flex: 1, overflow: 'auto', marginBottom: 12 }}>
+          <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflow: 'auto', marginBottom: 12 }}>
             <Spin spinning={loadingDetail}>
               {messages.length === 0 && !streaming ? (
                 <div style={{ marginTop: 48, textAlign: 'center', padding: '0 24px' }}>
