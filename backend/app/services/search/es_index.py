@@ -22,7 +22,14 @@ def chunk_index_mapping() -> dict:
                 "index_options": {"type": "hnsw", "m": 16, "ef_construction": 100},
                 "similarity": "cosine",
             },
-            "metadata": {"type": "object"},
+            "metadata": {
+                "type": "object",
+                "properties": {
+                    "valid_from": {"type": "date", "format": "yyyy-MM-dd||strict_date_optional_time"},
+                    "valid_to": {"type": "date", "format": "yyyy-MM-dd||strict_date_optional_time"},
+                    "version_no": {"type": "keyword"},
+                },
+            },
             "created_at": {"type": "date"},
         }
     }
@@ -45,3 +52,8 @@ async def ensure_index(es: AsyncElasticsearch | None = None) -> None:
             f"ES 索引 {index} 的 dims={existing_dims} 与配置 EMBEDDING_DIM="
             f"{_settings.embedding_dim} 不一致，请删除索引重建后再启动"
         )
+    # 存量索引补 metadata 子映射（幂等；与新建 mapping 保持一致）
+    await es.indices.put_mapping(
+        index=index,
+        properties={"metadata": chunk_index_mapping()["properties"]["metadata"]},
+    )

@@ -245,7 +245,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 async def upload_document(
     kb_id: uuid.UUID,
     file: UploadFile = File(...),
-    version_no: str | None = Form(None),
+    version_no: str | None = Form(None, max_length=50),
     valid_from: date | None = Form(None),
     valid_to: date | None = Form(None),
     supersedes_doc_id: uuid.UUID | None = Form(None),
@@ -588,10 +588,16 @@ async def backfill_all() -> dict:
                 index=index,
                 query={"term": {"doc_id": str(doc.id)}},
                 script={
+                    # 值未变化 → noop，让第二次运行如实报 updated: 0（计数幂等）；
+                    # 字段缺失（待回填）时 Map.get 返回 null → 走赋值分支
                     "source": (
+                        "if (ctx._source.metadata.valid_from == params.valid_from "
+                        "&& ctx._source.metadata.valid_to == params.valid_to "
+                        "&& ctx._source.metadata.version_no == params.version_no) "
+                        "{ ctx.op = 'noop'; } else { "
                         "ctx._source.metadata.valid_from = params.valid_from;"
                         "ctx._source.metadata.valid_to = params.valid_to;"
-                        "ctx._source.metadata.version_no = params.version_no"
+                        "ctx._source.metadata.version_no = params.version_no }"
                     ),
                     "params": params,
                 },
@@ -688,9 +694,12 @@ def test_put_updates_fields_and_syncs_es(client, admin_headers):
         assert got["version_no"] == "2024 版"
         assert got["valid_to"] == "2030-12-31"
 
-        # valid_to 改到过去 → ES 已同步（update_by_query 生效）→ 检索排除
+        # 显式清空 valid_from + 把 valid_to 改到过去 → 合法过期（合并口径下
+        # 2024-09-01 > 2020-01-01 会 400，必须先清 from）→ ES 同步 → 检索排除。
+        # 顺带钉住「显式 null = 清除」语义。
         client.put(
-            f"/api/v1/docs/{doc_id}", json={"valid_to": "2020-01-01"},
+            f"/api/v1/docs/{doc_id}",
+            json={"valid_from": None, "valid_to": "2020-01-01"},
             headers=admin_headers,
         )
         hits = client.post(
@@ -700,6 +709,8 @@ def test_put_updates_fields_and_syncs_es(client, admin_headers):
         ).json()
         assert not any(h["doc_name"] == "put1.md" for h in hits), \
             "valid_to 改为过去后 ES 应已同步、检索应排除"
+        got2 = client.get(f"/api/v1/docs/{doc_id}", headers=admin_headers).json()
+        assert got2["valid_from"] is None, "显式 null 应清除该字段"
     finally:
         client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
 
@@ -746,7 +757,31 @@ Expected: 新增 3 项中 `test_put_updates_fields_and_syncs_es` 以 `405`（方
 class DocumentUpdate(BaseModel):
     valid_from: date | None = None
     valid_to: date | None = None
-    version_no: str | None = None
+    version_no: str | None = Field(default=None, max_length=50)
+```
+
+（import 区补 `from pydantic import BaseModel, Field`。max_length 与列 String(50) 对齐，防超长 500——与 Task 1 upload Form 同型修复。）
+
+PUT 边界测试（追加到 `backend/tests/test_doc_governance.py` 末尾）：
+
+```python
+def test_put_version_no_too_long_422(client, admin_headers):
+    """PUT 超长 version_no 被 422 拒绝，不 500。"""
+    kb_id = _mk_kb(client, admin_headers, "PUT版本号边界测试库")
+    try:
+        up = client.post(
+            f"/api/v1/knowledge-bases/{kb_id}/docs",
+            headers=admin_headers,
+            files={"file": ("pb.md", "# pb\nPUT边界土人参".encode(), "text/markdown")},
+        ).json()
+        r = client.put(
+            f"/api/v1/docs/{up['id']}",
+            json={"version_no": "y" * 51},
+            headers=admin_headers,
+        )
+        assert r.status_code == 422, r.status_code
+    finally:
+        client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
 ```
 
 （文件头已有 `date` import（Task 1 改过）。注意：三字段全 null 表示「不更新」还是「清除」——**约定：请求体里出现的键才更新**，用 `model_fields_set` 判断；`null` 显式出现 = 清除该字段。）
@@ -840,12 +875,12 @@ asyncio.run(main())
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && python -m pytest tests/test_doc_governance.py -v`
-Expected: PASS（5 项全绿：原 2 + 新 3）
+Expected: PASS（7 项全绿：原 3 + 本任务 4——updates_sync / invalid_range / not_found / version_no 边界）
 
 - [ ] **Step 5: 全量回归后提交**
 
 Run: `cd backend && python -m pytest -q`
-Expected: 107 passed（104 + 3）, 57 warnings
+Expected: 109 passed（105 + 4）；warnings 实报（基线 64 + 新测试 jwt 既有类别若干，出现其他类别才上报）
 
 ```bash
 git add backend/app/api/v1/documents.py backend/app/schemas/document.py \
@@ -864,7 +899,7 @@ git commit -m "feat(docs): PUT validity/version update with ES metadata sync"
 
 **Interfaces:**
 - Consumes: Task 1 的 `supersedes_doc_id`；Task 2 的 ES 清除能力（`delete_by_query` 模式与既有 delete_document 相同）
-- Produces: 替换应用函数 `_apply_supersede(db, new_doc) -> bool`（vectorizer 内部）；上传时目标校验 400 语义
+- Produces: 替换应用函数 `_apply_supersede(db, new_doc) -> None`（vectorizer 内部函数，无外部消费者，失败路径直接 return 不标记）；上传时目标校验 400 语义
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1227,20 +1262,61 @@ MULTI_SOURCE_NOTICE = (
     valid_to: str | None = None
 ```
 
+- [ ] **Step 3b: Mock 行头契约适配（机制三在 mock provider 下必须可用）**
+
+`backend/app/services/llm/mock.py` 两处：
+
+1. 行头正则放宽为**可选 meta 段**（原：`》` 后紧跟冒号；新：允许 `》（…）：`）：
+```python
+_HEADER_RE = r"^\[\d+\]\s*《([^》]*)》(?:（[^）]*）)?[：:]\s?(.*)$"
+```
+2. `_parse_blocks` 逐行循环中，在行头匹配判断**之前**跳过提示行：
+```python
+            if line.startswith("[提示]"):
+                continue  # 冲突提示行不是块头也不是引用内容，不进 mock 回答
+```
+（按 mock.py 实际循环结构落位——`line.startswith` 判断放在 `re.match(_HEADER_RE, line)` 之前即可。）
+
+同步文案两处：mock.py 模块 docstring 中的行头示例、`openai_adapter.py` 内 prompt 说明（`[n] 《资料标题》：内容` → `[n] 《资料标题》（可选版本/生效标注）：内容`）。
+
+追加测试到 `backend/tests/test_governance_prompt.py`：
+
+```python
+def test_mock_parses_meta_header_and_skips_notice():
+    """机制三兼容 mock provider：标注行按块头解析、提示行不进回答。"""
+    import asyncio as _a
+
+    from app.services.llm.mock import MockLLM
+
+    prompt = (
+        "[1] 《学籍管理规定》（2023 版，生效2023-09-01）：旧规内容\n"
+        "[2] 《B办法》：乙规定\n"
+        "\n[提示] 以上资料来自多份文档，若规定不一致，请指出差异并以生效日期较新者为准。"
+        "\n\n问题：测试问题"
+    )
+    answer = _a.run(MockLLM().generate(prompt))
+    assert "[提示]" not in answer, "提示行不应被 mock 引用进回答"
+    assert "（2023 版，生效2023-09-01）" not in answer, "原始标注行不应被当正文引用"
+    assert "学籍管理规定" in answer, "标注后的标题应仍被识别为块头"
+```
+
+（若 `MockLLM().generate` 的既有签名/输出形状与上述断言冲突，以真实实现调整断言——但三条语义必须保住：提示行不进回答、标注行不被当正文、标题仍识别。）
+
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && python -m pytest tests/test_governance_prompt.py -v`
-Expected: PASS（4 项全绿）
+Expected: PASS（5 项全绿）
 
 - [ ] **Step 5: 全量回归后提交（注意既有 prompt 断言）**
 
 Run: `cd backend && python -m pytest -q`
-Expected: 114 passed（110 + 4）, 57 warnings
+Expected: 117 passed（116 + 1 mock 兼容测试）；warnings 实报（基线 71）
 （若 `test_run_rag_flow_prompt_contains_history` 或 `test_chat` 中断言受影响立即报告——它们的 fake chunks 不带 version/valid 字段，输出格式不变，理论上全绿）
 
 ```bash
 git add backend/app/services/rag/langgraph/nodes.py backend/app/services/search/hybrid.py \
-        backend/app/schemas/document.py backend/tests/test_governance_prompt.py
+        backend/app/schemas/document.py backend/app/services/llm/mock.py \
+        backend/app/services/llm/openai_adapter.py backend/tests/test_governance_prompt.py
 git commit -m "feat(rag): version/validity in context and multi-source conflict notice"
 ```
 
@@ -1447,6 +1523,7 @@ import dayjs from 'dayjs'
   }
 
   const handleVersionOk = async () => {
+    if (versionSubmitting) return  // in-flight 防重：双击不产生第二次上传
     const { file, existing } = versionModal
     if (!file || !selectedKbId) { setVersionModal({ open: false, file: null, existing: null }); return }
     const opts: UploadDocOptions = {
@@ -1455,13 +1532,29 @@ import dayjs from 'dayjs'
       valid_to: versionForm.valid_to ? versionForm.valid_to.format('YYYY-MM-DD') : undefined,
       supersedes_doc_id: versionForm.replace && existing ? existing.id : undefined,
     }
-    await doUpload(file, opts)
+    setVersionSubmitting(true)
+    try {
+      await doUpload(file, opts)
+    } finally {
+      setVersionSubmitting(false)
+    }
     setVersionModal({ open: false, file: null, existing: null })
     setVersionForm({ replace: true, version_no: '', valid_from: undefined, valid_to: undefined })
   }
 ```
 
-（`UploadDocOptions` 需从 `../api/kb` import。`handleUpload` 原 body 删除。）
+（`UploadDocOptions` 需从 `../api/kb` import。`handleUpload` 原 body 删除。
+配套 state——加在 `versionForm` 的 useState 之后：）
+
+```ts
+  const [versionSubmitting, setVersionSubmitting] = useState(false)
+```
+
+Modal 上绑定（防双击产生重复文档——替换废止发生在向量化成功时，in-flight 期间两次上传都会 201）：
+
+```tsx
+        confirmLoading={versionSubmitting}
+```
 
 **c) 表格列与开关**（`columns` 的「状态」列后插「效力」列；Card extra 的 Upload 按钮前插 Switch）：
 
@@ -1491,7 +1584,7 @@ Card extra（Search Input 之前）：
                 <Switch
                   size="small"
                   checked={activeOnly}
-                  onChange={(v) => { setActiveOnly(v); if (selectedKbId) loadDocs(selectedKbId, search || undefined, v) }}
+                  onChange={setActiveOnly}  {/* 状态变更由 useEffect [selectedKbId, activeOnly] 统一触发加载，避免双请求 */}
                 />
                 <Typography.Text type="secondary">只看现行</Typography.Text>
               </Space>

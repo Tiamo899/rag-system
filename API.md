@@ -28,18 +28,19 @@
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| POST | `/knowledge-bases/{kb_id}/docs` | `doc:upload` | 上传（pdf/docx/md/txt，≤20MB） |
-| GET | `/knowledge-bases/{kb_id}/docs` | `doc:read` | 列表（分页 + search 按文件名） |
+| POST | `/knowledge-bases/{kb_id}/docs` | `doc:upload` | 上传（pdf/docx/md/txt，≤20MB）（可选 form 字段 version_no/valid_from/valid_to/supersedes_doc_id——同名替换意图） |
+| GET | `/knowledge-bases/{kb_id}/docs` | `doc:read` | 列表（分页 + search 按文件名）；支持 active_only=true 只看现行 |
 | GET | `/docs/{id}` | `doc:read` | 详情（含向量化状态） |
 | POST | `/docs/{id}/vectorize` | `doc:vectorize` | 手动触发向量化（异步，前端轮询状态） |
 | GET | `/docs/{id}/chunks` | `doc:read` | 分块预览（不落库） |
 | DELETE | `/docs/{id}` | `doc:delete` | 删除（级联分块 + 清 ES） |
+| PUT | `/docs/{id}` | `doc:update` | 更新时效/版本（body: valid_from/valid_to/version_no，null=清除；非法区间 400；同步 ES metadata） |
 
 ## 检索 search
 
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
-| POST | `/search` | `kb:read` | 混合检索。body `{query, kb_id, top_k, search_type: hybrid\|vector\|keyword}`，返回结果含来源/分块/相似度 |
+| POST | `/search` | `kb:read` | 混合检索。body `{query, kb_id, top_k, search_type: hybrid\|vector\|keyword}`，返回结果含来源/分块/相似度；结果含 version_no/valid_from/valid_to，检索按文档时效过滤（valid_from ≤ 今天 ≤ valid_to，缺字段不命中） |
 
 ## 智能问答 chat
 

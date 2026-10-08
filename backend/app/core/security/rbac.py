@@ -10,7 +10,7 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
     "admin": {"*:*"},
     "editor": {
         "kb:create", "kb:read", "kb:update", "kb:delete",
-        "doc:upload", "doc:read", "doc:delete", "doc:vectorize",
+        "doc:upload", "doc:read", "doc:delete", "doc:vectorize", "doc:update",
         "chat:use", "chat:history",
     },
     "viewer": {"kb:read", "doc:read", "chat:use", "chat:history"},
@@ -37,6 +37,7 @@ PERMISSIONS_CATALOG: list[dict] = [
             {"key": "doc:read", "label": "查看"},
             {"key": "doc:delete", "label": "删除"},
             {"key": "doc:vectorize", "label": "向量化"},
+            {"key": "doc:update", "label": "编辑时效"},
         ],
     },
     {

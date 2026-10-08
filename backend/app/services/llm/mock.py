@@ -1,7 +1,7 @@
 """Mock LLM：基于编号资料拼装回答，回填 [n] 引用标记。
 
 prompt 约定（由 generate 节点构造，每个块可跨多行）：
-    [1] 《奖学金评定办法》：申请条件…
+    [1] 《奖学金评定办法》（可选版本/生效标注）：申请条件…
         - 评定年度内无不及格课程
     [2] 《选课管理办法》：学分要求…
 
@@ -12,7 +12,7 @@ import re
 from app.services.llm.base import BaseLLM
 
 FALLBACK_TEXT = "未在知识库中找到相关内容，请换个问法或联系教务老师补充资料。"
-_HEADER_RE = re.compile(r"^\[\d+\]\s*《([^》]*)》[：:]\s?(.*)$")
+_HEADER_RE = re.compile(r"^\[\d+\]\s*《([^》]*)》(?:（[^）]*）)?[：:]\s?(.*)$")
 _MAX_QUOTE = 300
 
 
@@ -33,6 +33,8 @@ def _parse_blocks(prompt: str) -> list[tuple[str | None, str]]:
         if line.strip().startswith("问题"):
             flush()
             break
+        if line.startswith("[提示]"):
+            continue  # 冲突提示行不是块头也不是引用内容，不进 mock 回答
         m = _HEADER_RE.match(line)
         if m:
             flush()

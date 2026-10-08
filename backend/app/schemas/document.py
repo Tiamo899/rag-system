@@ -1,8 +1,8 @@
 """文档相关 Pydantic 模型。"""
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DocumentOut(BaseModel):
@@ -14,9 +14,20 @@ class DocumentOut(BaseModel):
     file_size: int | None
     status: str
     chunk_count: int
+    valid_from: date | None = None
+    valid_to: date | None = None
+    version_no: str | None = None
+    superseded_by: uuid.UUID | None = None
+    supersedes_doc_id: uuid.UUID | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DocumentUpdate(BaseModel):
+    valid_from: date | None = None
+    valid_to: date | None = None
+    version_no: str | None = Field(default=None, max_length=50)
 
 
 class DocumentChunkOut(BaseModel):
@@ -40,3 +51,6 @@ class SearchResultOut(BaseModel):
     chunk_index: int
     content: str
     score: float
+    version_no: str | None = None
+    valid_from: str | None = None
+    valid_to: str | None = None

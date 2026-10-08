@@ -20,6 +20,7 @@ COPY alembic ./alembic
 COPY alembic.ini .
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+COPY scripts ./scripts
 
 EXPOSE 8000
 ENTRYPOINT ["docker-entrypoint.sh"]

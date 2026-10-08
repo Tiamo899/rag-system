@@ -40,6 +40,11 @@ export interface DocumentItem {
   status: DocStatus
   chunk_count: number
   created_at: string
+  valid_from?: string | null
+  valid_to?: string | null
+  version_no?: string | null
+  superseded_by?: string | null
+  supersedes_doc_id?: string | null
 }
 
 export interface DocumentChunk {

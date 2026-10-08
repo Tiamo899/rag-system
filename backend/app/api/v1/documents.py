@@ -1,10 +1,12 @@
 """文档接口：上传 / 列表 / 详情 / 分块预览 / 删除。"""
 import asyncio
+import logging
 import uuid
+from datetime import date
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,12 +15,13 @@ from app.core.deps import require_permission
 from app.core.exceptions import AppError, NotFoundError
 from app.db.session import get_db
 from app.models import Document, KnowledgeBase, User
-from app.schemas.document import DocumentChunkOut, DocumentOut
+from app.schemas.document import DocumentChunkOut, DocumentOut, DocumentUpdate
 from app.services.chunking.splitter import derive_title, split_text
 from app.services.document_parser.factory import file_type_from_name, get_parser
 from app.services.vectorizer import trigger_vectorization
 
 router = APIRouter(tags=["documents"])
+logger = logging.getLogger(__name__)
 
 
 async def _get_doc(db: AsyncSession, doc_id: uuid.UUID) -> Document:
@@ -32,6 +35,10 @@ async def _get_doc(db: AsyncSession, doc_id: uuid.UUID) -> Document:
 async def upload_document(
     kb_id: uuid.UUID,
     file: UploadFile = File(...),
+    version_no: str | None = Form(None, max_length=50),
+    valid_from: date | None = Form(None),
+    valid_to: date | None = Form(None),
+    supersedes_doc_id: uuid.UUID | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("doc:upload")),
 ) -> Document:
@@ -51,6 +58,17 @@ async def upload_document(
             code="FILE_TOO_LARGE", status_code=413,
         )
 
+    if valid_from and valid_to and valid_from > valid_to:
+        raise AppError("生效日期不能晚于失效日期", code="INVALID_DATE_RANGE", status_code=400)
+    if supersedes_doc_id is not None:
+        target = await db.get(Document, supersedes_doc_id)
+        if target is None:
+            raise AppError("替换目标文档不存在", code="INVALID_SUPERSEDES_TARGET", status_code=400)
+        if target.kb_id != kb_id:
+            raise AppError("替换目标必须在同一知识库", code="INVALID_SUPERSEDES_TARGET", status_code=400)
+        if target.superseded_by is not None:
+            raise AppError("替换目标已是废止文档", code="INVALID_SUPERSEDES_TARGET", status_code=400)
+
     doc = Document(
         kb_id=kb_id,
         filename=original_name,
@@ -59,6 +77,10 @@ async def upload_document(
         file_size=len(data),
         created_by=user.id,
         status="pending",
+        version_no=version_no,
+        valid_from=valid_from,
+        valid_to=valid_to,
+        supersedes_doc_id=supersedes_doc_id,
     )
     db.add(doc)
     await db.commit()
@@ -80,12 +102,15 @@ async def upload_document(
 async def list_documents(
     kb_id: uuid.UUID,
     search: str | None = Query(default=None),
+    active_only: bool = Query(default=False, description="只看现行文档（superseded_by 为空）"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_permission("doc:read")),
 ):
     q = select(Document).where(Document.kb_id == kb_id)
+    if active_only:
+        q = q.where(Document.superseded_by.is_(None))
     if search:
         q = q.where(Document.original_name.ilike(f"%{search}%"))
     q = q.order_by(Document.created_at.desc())
@@ -142,6 +167,64 @@ async def preview_chunks(
         )
         for i, c in enumerate(chunks)
     ]
+
+
+@router.put("/docs/{doc_id}", response_model=DocumentOut)
+async def update_document(
+    doc_id: uuid.UUID,
+    body: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(require_permission("doc:update")),
+):
+    """更新时效/版本字段（局部）。更新后同步 ES metadata，零重新向量化。"""
+    doc = await _get_doc(db, doc_id)
+    # 区间校验按「合并后的生效值」算——只改一个字段也必须拦截坏区间
+    new_from = body.valid_from if "valid_from" in body.model_fields_set else doc.valid_from
+    new_to = body.valid_to if "valid_to" in body.model_fields_set else doc.valid_to
+    if new_from is not None and new_to is not None and new_from > new_to:
+        raise AppError("生效日期不能晚于失效日期", code="INVALID_DATE_RANGE", status_code=400)
+
+    changed = {}
+    for field in ("valid_from", "valid_to", "version_no"):
+        if field in body.model_fields_set:
+            setattr(doc, field, getattr(body, field))
+            changed[field] = getattr(body, field)
+    await db.commit()
+    await db.refresh(doc)
+
+    if changed:
+        await _sync_es_metadata(doc)
+    return doc
+
+
+async def _sync_es_metadata(doc: Document) -> None:
+    """把文档当前时效刷进 ES metadata（update_by_query，零 embedding）。幂等。"""
+    from app.core.elasticsearch import get_es
+    from app.core.config import get_settings
+
+    params = {
+        "valid_from": (doc.valid_from or (doc.created_at.date() if doc.created_at else date.today())).isoformat(),
+        "valid_to": (doc.valid_to or date(9999, 12, 31)).isoformat(),
+        "version_no": doc.version_no,
+    }
+    es = get_es()
+    try:
+        await es.update_by_query(
+            index=get_settings().es_index,
+            query={"term": {"doc_id": str(doc.id)}},
+            script={
+                "source": (
+                    "ctx._source.metadata.valid_from = params.valid_from;"
+                    "ctx._source.metadata.valid_to = params.valid_to;"
+                    "ctx._source.metadata.version_no = params.version_no"
+                ),
+                "params": params,
+            },
+            refresh=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # PG 已 commit，时效以 PG 为准；ES 同步失败只告警，re-PUT 可重试
+        logger.warning("doc %s ES metadata sync failed: %s", doc.id, exc, exc_info=True)
 
 
 @router.delete("/docs/{doc_id}", status_code=204)

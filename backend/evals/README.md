@@ -37,6 +37,6 @@ python -m evals.run_eval --tag phase1 --dataset multi_turn   # 单数据集
 
 - 基线：`--tag baseline`
 - Phase 1 后：`--tag phase1 --multi-turn-mode history`（对比 `multi_turn`：judge 50%→66.67%、keyword 100%→83.33%、Hit@3 持平 100%。keyword 破位为 mt-03 歧义指代消解失败，根因见对应结果 md 的「回归分析」注记——judge 与 keyword 两面并呈，不得只报提升）
-- Phase 2 后：`--tag phase2`（对比 `governance`，旧版数字命中应归零）
+- Phase 2 后：`--tag phase2`（对比 `governance`：场景 A 检索侧达标——2023 版零引用（基线 2 次→0）、gv-01 来源首位 2023→2024；keyword/judge 50%→50% 持平（n=2 无 case 翻转），根因是跨文档矛盾而非治理失效，见对应结果 md 的「验收分析」注记——两面并呈，不得只报检索侧达标）
 
 对比 = 直接看两份 md 报告，或 `git diff` results 目录。

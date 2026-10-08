@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Button,
   Card,
+  Checkbox,
   Col,
+  DatePicker,
   Drawer,
   Empty,
   Form,
@@ -14,11 +16,13 @@ import {
   Row,
   Space,
   Spin,
+  Switch,
   Table,
   Tag,
   Typography,
   Upload,
 } from 'antd'
+import dayjs from 'dayjs'
 import {
   DeleteOutlined,
   EyeOutlined,
@@ -36,6 +40,7 @@ import {
   triggerVectorize,
   uploadDocument,
 } from '../api/kb'
+import type { UploadDocOptions } from '../api/kb'
 import { getErrorMessage } from '../api/http'
 import { formatTime } from '../utils/time'
 import type { DocumentChunk, DocumentItem, DocStatus, KnowledgeBase } from '../types'
@@ -67,6 +72,19 @@ export default function KnowledgeBase() {
   const [docs, setDocs] = useState<DocumentItem[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
+  const [activeOnly, setActiveOnly] = useState(false)
+  const [versionModal, setVersionModal] = useState<{
+    open: boolean
+    file: File | null
+    existing: DocumentItem | null
+  }>({ open: false, file: null, existing: null })
+  const [versionForm, setVersionForm] = useState({
+    replace: true,
+    version_no: '',
+    valid_from: undefined as dayjs.Dayjs | undefined,
+    valid_to: undefined as dayjs.Dayjs | undefined,
+  })
+  const [versionSubmitting, setVersionSubmitting] = useState(false)
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm()
@@ -88,10 +106,10 @@ export default function KnowledgeBase() {
     }
   }, [])
 
-  const loadDocs = useCallback(async (kbId: string, q?: string) => {
+  const loadDocs = useCallback(async (kbId: string, q?: string, active?: boolean) => {
     setLoading(true)
     try {
-      const data = await listDocuments(kbId, q)
+      const data = await listDocuments(kbId, q, active)
       setDocs(data)
     } catch (e) {
       message.error(getErrorMessage(e))
@@ -105,9 +123,9 @@ export default function KnowledgeBase() {
   }, [loadKbs])
 
   useEffect(() => {
-    if (selectedKbId) loadDocs(selectedKbId, search || undefined)
+    if (selectedKbId) loadDocs(selectedKbId, search || undefined, activeOnly)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedKbId])
+  }, [selectedKbId, activeOnly])
 
   const pollDocStatus = useCallback((docId: string) => {
     if (pollRef.current) window.clearInterval(pollRef.current)
@@ -140,16 +158,51 @@ export default function KnowledgeBase() {
     }
   }
 
-  const handleUpload = async (file: File) => {
-    if (!selectedKbId) return false
+  const doUpload = async (file: File, opts?: UploadDocOptions) => {
+    if (!selectedKbId) return
     try {
-      await uploadDocument(selectedKbId, file)
+      await uploadDocument(selectedKbId, file, opts)
       message.success(`「${file.name}」上传成功`)
-      loadDocs(selectedKbId, search || undefined)
+      loadDocs(selectedKbId, search || undefined, activeOnly)
     } catch (e) {
       message.error(getErrorMessage(e))
     }
+  }
+
+  const handleUpload = async (file: File) => {
+    if (!selectedKbId) return false
+    const existing = docs.find(
+      (d) => d.original_name === file.name && !d.superseded_by
+    )
+    if (existing) {
+      setVersionModal({ open: true, file, existing })
+      return false
+    }
+    await doUpload(file)
     return false
+  }
+
+  const handleVersionOk = async () => {
+    if (versionSubmitting) return  // in-flight 防重：双击不产生第二次上传
+    const { file, existing } = versionModal
+    if (!file || !selectedKbId) {
+      setVersionModal({ open: false, file: null, existing: null })
+      return
+    }
+    const opts: UploadDocOptions = {
+      version_no: versionForm.version_no || undefined,
+      valid_from: versionForm.valid_from ? versionForm.valid_from.format('YYYY-MM-DD') : undefined,
+      valid_to: versionForm.valid_to ? versionForm.valid_to.format('YYYY-MM-DD') : undefined,
+      supersedes_doc_id: versionForm.replace && existing ? existing.id : undefined,
+    }
+    setVersionSubmitting(true)
+    try {
+      await doUpload(file, opts)
+    } finally {
+      setVersionSubmitting(false)
+    }
+    setVersionModal({ open: false, file: null, existing: null })
+    setVersionForm({ replace: true, version_no: '', valid_from: undefined, valid_to: undefined })
   }
 
   const handleEye = async (doc: DocumentItem) => {
@@ -179,7 +232,7 @@ export default function KnowledgeBase() {
     try {
       await deleteDocument(docId)
       message.success('文档已删除')
-      if (selectedKbId) loadDocs(selectedKbId, search || undefined)
+      if (selectedKbId) loadDocs(selectedKbId, search || undefined, activeOnly)
     } catch (e) {
       message.error(getErrorMessage(e))
     }
@@ -202,6 +255,22 @@ export default function KnowledgeBase() {
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 110,
       render: (v: DocStatus) => <Tag color={STATUS_COLOR[v]}>{STATUS_TEXT[v]}</Tag>,
+    },
+    {
+      title: '效力', key: 'governance', width: 210,
+      render: (_: unknown, doc: DocumentItem) => (
+        <Space direction="vertical" size={2}>
+          {doc.superseded_by
+            ? <Tag color="red">已废止</Tag>
+            : <Tag color="green">现行</Tag>}
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {doc.version_no ? `${doc.version_no} · ` : ''}
+            {doc.valid_from || doc.valid_to
+              ? `${doc.valid_from ?? '…'} ~ ${doc.valid_to ?? '…'}`
+              : '长期有效'}
+          </Typography.Text>
+        </Space>
+      ),
     },
     { title: '上传时间', dataIndex: 'created_at', key: 'time', width: 170, render: (v: string) => formatTime(v) },
     {
@@ -269,6 +338,14 @@ export default function KnowledgeBase() {
           title={selectedKb?.name ?? '选择知识库'}
           extra={
             <Space>
+              <Space>
+                <Switch
+                  size="small"
+                  checked={activeOnly}
+                  onChange={setActiveOnly}
+                />
+                <Typography.Text type="secondary">只看现行</Typography.Text>
+              </Space>
               <Input
                 allowClear
                 placeholder="搜索文档名"
@@ -276,7 +353,7 @@ export default function KnowledgeBase() {
                 style={{ width: 180 }}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                onPressEnter={() => selectedKbId && loadDocs(selectedKbId, search || undefined)}
+                onPressEnter={() => selectedKbId && loadDocs(selectedKbId, search || undefined, activeOnly)}
               />
               <Upload showUploadList={false} beforeUpload={handleUpload} accept=".pdf,.docx,.md,.txt">
                 <Button type="primary" icon={<UploadOutlined />} disabled={!selectedKbId}>
@@ -342,6 +419,52 @@ export default function KnowledgeBase() {
           />
         </Spin>
       </Drawer>
+
+      <Modal
+        title={`检测到同名文档：${versionModal.existing?.original_name ?? ''}`}
+        open={versionModal.open}
+        onOk={handleVersionOk}
+        onCancel={() => setVersionModal({ open: false, file: null, existing: null })}
+        okText="上传"
+        confirmLoading={versionSubmitting}
+      >
+        <Form layout="vertical" style={{ marginTop: 12 }}>
+          <Form.Item>
+            <Typography.Paragraph type="secondary">
+              知识库中已有同名且现行的文档。勾选替换后，新文档向量化成功时旧版将自动废止并清除其检索分块。
+            </Typography.Paragraph>
+          </Form.Item>
+          <Form.Item label="版本信息">
+            <Checkbox
+              checked={versionForm.replace}
+              onChange={(e) => setVersionForm((f) => ({ ...f, replace: e.target.checked }))}
+            >
+              作为新版本替换旧文档
+            </Checkbox>
+          </Form.Item>
+          <Form.Item label="版本号">
+            <Input
+              placeholder="如：2024 版"
+              value={versionForm.version_no}
+              onChange={(e) => setVersionForm((f) => ({ ...f, version_no: e.target.value }))}
+            />
+          </Form.Item>
+          <Form.Item label="生效 / 失效日期（可选）">
+            <Space.Compact block>
+              <DatePicker
+                style={{ width: '50%' }}
+                value={versionForm.valid_from}
+                onChange={(v) => setVersionForm((f) => ({ ...f, valid_from: v ?? undefined }))}
+              />
+              <DatePicker
+                style={{ width: '50%' }}
+                value={versionForm.valid_to}
+                onChange={(v) => setVersionForm((f) => ({ ...f, valid_to: v ?? undefined }))}
+              />
+            </Space.Compact>
+          </Form.Item>
+        </Form>
+      </Modal>
     </Row>
   )
 }
