@@ -34,6 +34,36 @@ def trigger_vectorization(doc_id: uuid.UUID) -> bool:
     return True
 
 
+async def _apply_supersede(db, new_doc: Document) -> None:
+    """向量化成功后应用替换：清旧分块（先 ES 后 PG）→ 标记废止。
+
+    任何一步失败都不标记（旧文档保持现行，fail-open）；ES 清理失败只告警不抛，
+    因为此时旧内容仍可检索、知识未断档，重触发新版向量化可重试。
+    """
+    old = await db.get(Document, new_doc.supersedes_doc_id)
+    if old is None or old.superseded_by is not None:
+        logger.warning(
+            "supersede target %s missing or already superseded, skip",
+            new_doc.supersedes_doc_id,
+        )
+        return
+    # 1) ES 物理清除旧分块
+    try:
+        es = get_es()
+        await es.delete_by_query(
+            index=_settings.es_index,
+            query={"term": {"doc_id": str(old.id)}},
+            refresh=True,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("supersede ES purge failed for %s: %s", old.id, exc)
+        return
+    # 2) PG 分块级联删 + 标记废止（同一事务）
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.doc_id == old.id))
+    old.superseded_by = new_doc.id
+    await db.commit()
+
+
 async def _run_vectorize(doc_id: uuid.UUID) -> None:
     async with AsyncSessionLocal() as db:
         doc = await db.get(Document, doc_id)
@@ -43,6 +73,8 @@ async def _run_vectorize(doc_id: uuid.UUID) -> None:
         await db.commit()
         try:
             await _do_vectorize(db, doc)
+            if doc.supersedes_doc_id:
+                await _apply_supersede(db, doc)
         except Exception as exc:  # noqa: BLE001
             logger.exception("文档 %s 向量化失败: %s", doc_id, exc)
             await db.rollback()

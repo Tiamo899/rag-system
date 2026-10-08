@@ -56,6 +56,17 @@ async def upload_document(
             code="FILE_TOO_LARGE", status_code=413,
         )
 
+    if valid_from and valid_to and valid_from > valid_to:
+        raise AppError("生效日期不能晚于失效日期", code="INVALID_DATE_RANGE", status_code=400)
+    if supersedes_doc_id is not None:
+        target = await db.get(Document, supersedes_doc_id)
+        if target is None:
+            raise AppError("替换目标文档不存在", code="INVALID_SUPERSEDES_TARGET", status_code=400)
+        if target.kb_id != kb_id:
+            raise AppError("替换目标必须在同一知识库", code="INVALID_SUPERSEDES_TARGET", status_code=400)
+        if target.superseded_by is not None:
+            raise AppError("替换目标已是废止文档", code="INVALID_SUPERSEDES_TARGET", status_code=400)
+
     doc = Document(
         kb_id=kb_id,
         filename=original_name,
