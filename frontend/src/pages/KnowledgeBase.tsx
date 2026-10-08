@@ -335,7 +335,7 @@ export default function KnowledgeBase() {
                 <Switch
                   size="small"
                   checked={activeOnly}
-                  onChange={(v) => { setActiveOnly(v); if (selectedKbId) loadDocs(selectedKbId, search || undefined, v) }}
+                  onChange={setActiveOnly}
                 />
                 <Typography.Text type="secondary">只看现行</Typography.Text>
               </Space>
