@@ -33,10 +33,16 @@ async def backfill_all() -> dict:
                 index=index,
                 query={"term": {"doc_id": str(doc.id)}},
                 script={
+                    # 值未变化 → noop，让第二次运行如实报 updated: 0（计数幂等）；
+                    # 字段缺失（待回填）时 Map.get 返回 null → 走赋值分支
                     "source": (
+                        "if (ctx._source.metadata.valid_from == params.valid_from "
+                        "&& ctx._source.metadata.valid_to == params.valid_to "
+                        "&& ctx._source.metadata.version_no == params.version_no) "
+                        "{ ctx.op = 'noop'; } else { "
                         "ctx._source.metadata.valid_from = params.valid_from;"
                         "ctx._source.metadata.valid_to = params.valid_to;"
-                        "ctx._source.metadata.version_no = params.version_no"
+                        "ctx._source.metadata.version_no = params.version_no }"
                     ),
                     "params": params,
                 },
