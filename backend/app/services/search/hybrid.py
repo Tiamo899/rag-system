@@ -30,6 +30,9 @@ def _hit_to_result(hit: dict) -> dict:
         "chunk_index": meta.get("chunk_index"),
         "content": src.get("content"),
         "content_vector": src.get("content_vector"),
+        "version_no": meta.get("version_no"),
+        "valid_from": meta.get("valid_from"),
+        "valid_to": meta.get("valid_to"),
         "score": hit.get("_score") or 0.0,
     }
 

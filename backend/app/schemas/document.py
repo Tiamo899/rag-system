@@ -51,3 +51,6 @@ class SearchResultOut(BaseModel):
     chunk_index: int
     content: str
     score: float
+    version_no: str | None = None
+    valid_from: str | None = None
+    valid_to: str | None = None

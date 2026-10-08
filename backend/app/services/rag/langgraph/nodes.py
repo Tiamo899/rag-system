@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 _GREETINGS = ("你好", "您好", "hi", "hello", "hey", "早上好", "下午好", "晚上好", "在吗", "你是谁")
 
+MULTI_SOURCE_NOTICE = (
+    "\n[提示] 以上资料来自多份文档，若规定不一致，请指出差异并以生效日期较新者为准。"
+)
+
 PROMPT_TRUNCATE = 300  # 进入改写/生成 prompt 的单条消息截断长度
 
 REWRITE_PROMPT = """结合对话历史，把用户最新问题改写成独立完整的问题（补全其中的指代与省略）。
@@ -124,10 +128,21 @@ async def evaluate_node(state: RAGState) -> dict:
     except Exception:  # noqa: BLE001 —— 语义验证失败不影响 RRF 判定
         pass
 
-    context = "\n".join(
-        f"[{i + 1}] 《{c.get('title') or c.get('doc_name') or '资料'}》：{c['content']}"
-        for i, c in enumerate(chunks[:3])
-    )
+    def _fmt(i: int, c: dict) -> str:
+        name = c.get("title") or c.get("doc_name") or "资料"
+        meta_parts = []
+        if c.get("version_no"):
+            meta_parts.append(c["version_no"])
+        if c.get("valid_from"):
+            meta_parts.append(f"生效{c['valid_from']}")
+        meta = f"（{'，'.join(meta_parts)}）" if meta_parts else ""
+        return f"[{i + 1}] 《{name}》{meta}：{c['content']}"
+
+    lines = [_fmt(i, c) for i, c in enumerate(chunks[:3])]
+    doc_ids = {c.get("doc_id") for c in chunks[:3] if c.get("doc_id")}
+    context = "\n".join(lines)
+    if len(doc_ids) >= 2:
+        context += MULTI_SOURCE_NOTICE
     return {"has_relevant_content": rrf_ok or cos_ok, "context": context}
 
 
