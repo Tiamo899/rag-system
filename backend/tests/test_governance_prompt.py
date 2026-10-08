@@ -58,3 +58,21 @@ def test_single_source_no_notice_even_with_two_chunks():
         {"question": "q", "retrieved_chunks": chunks}
     ))
     assert "资料来自多份文档" not in out["context"]
+
+
+def test_mock_parses_meta_header_and_skips_notice():
+    """机制三兼容 mock provider：标注行按块头解析、提示行不进回答。"""
+    import asyncio as _a
+
+    from app.services.llm.mock import MockLLM
+
+    prompt = (
+        "[1] 《学籍管理规定》（2023 版，生效2023-09-01）：旧规内容\n"
+        "[2] 《B办法》：乙规定\n"
+        "\n[提示] 以上资料来自多份文档，若规定不一致，请指出差异并以生效日期较新者为准。"
+        "\n\n问题：测试问题"
+    )
+    answer = _a.run(MockLLM().generate(prompt))
+    assert "[提示]" not in answer, "提示行不应被 mock 引用进回答"
+    assert "（2023 版，生效2023-09-01）" not in answer, "原始标注行不应被当正文引用"
+    assert "学籍管理规定" in answer, "标注后的标题应仍被识别为块头"
