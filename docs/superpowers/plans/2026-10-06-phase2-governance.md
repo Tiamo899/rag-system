@@ -694,9 +694,12 @@ def test_put_updates_fields_and_syncs_es(client, admin_headers):
         assert got["version_no"] == "2024 版"
         assert got["valid_to"] == "2030-12-31"
 
-        # valid_to 改到过去 → ES 已同步（update_by_query 生效）→ 检索排除
+        # 显式清空 valid_from + 把 valid_to 改到过去 → 合法过期（合并口径下
+        # 2024-09-01 > 2020-01-01 会 400，必须先清 from）→ ES 同步 → 检索排除。
+        # 顺带钉住「显式 null = 清除」语义。
         client.put(
-            f"/api/v1/docs/{doc_id}", json={"valid_to": "2020-01-01"},
+            f"/api/v1/docs/{doc_id}",
+            json={"valid_from": None, "valid_to": "2020-01-01"},
             headers=admin_headers,
         )
         hits = client.post(
@@ -706,6 +709,8 @@ def test_put_updates_fields_and_syncs_es(client, admin_headers):
         ).json()
         assert not any(h["doc_name"] == "put1.md" for h in hits), \
             "valid_to 改为过去后 ES 应已同步、检索应排除"
+        got2 = client.get(f"/api/v1/docs/{doc_id}", headers=admin_headers).json()
+        assert got2["valid_from"] is None, "显式 null 应清除该字段"
     finally:
         client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
 
@@ -752,7 +757,31 @@ Expected: 新增 3 项中 `test_put_updates_fields_and_syncs_es` 以 `405`（方
 class DocumentUpdate(BaseModel):
     valid_from: date | None = None
     valid_to: date | None = None
-    version_no: str | None = None
+    version_no: str | None = Field(default=None, max_length=50)
+```
+
+（import 区补 `from pydantic import BaseModel, Field`。max_length 与列 String(50) 对齐，防超长 500——与 Task 1 upload Form 同型修复。）
+
+PUT 边界测试（追加到 `backend/tests/test_doc_governance.py` 末尾）：
+
+```python
+def test_put_version_no_too_long_422(client, admin_headers):
+    """PUT 超长 version_no 被 422 拒绝，不 500。"""
+    kb_id = _mk_kb(client, admin_headers, "PUT版本号边界测试库")
+    try:
+        up = client.post(
+            f"/api/v1/knowledge-bases/{kb_id}/docs",
+            headers=admin_headers,
+            files={"file": ("pb.md", "# pb\nPUT边界土人参".encode(), "text/markdown")},
+        ).json()
+        r = client.put(
+            f"/api/v1/docs/{up['id']}",
+            json={"version_no": "y" * 51},
+            headers=admin_headers,
+        )
+        assert r.status_code == 422, r.status_code
+    finally:
+        client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=admin_headers)
 ```
 
 （文件头已有 `date` import（Task 1 改过）。注意：三字段全 null 表示「不更新」还是「清除」——**约定：请求体里出现的键才更新**，用 `model_fields_set` 判断；`null` 显式出现 = 清除该字段。）
@@ -846,12 +875,12 @@ asyncio.run(main())
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `cd backend && python -m pytest tests/test_doc_governance.py -v`
-Expected: PASS（5 项全绿：原 2 + 新 3）
+Expected: PASS（7 项全绿：原 3 + 本任务 4——updates_sync / invalid_range / not_found / version_no 边界）
 
 - [ ] **Step 5: 全量回归后提交**
 
 Run: `cd backend && python -m pytest -q`
-Expected: 107 passed（104 + 3）, 57 warnings
+Expected: 109 passed（105 + 4）；warnings 实报（基线 64 + 新测试 jwt 既有类别若干，出现其他类别才上报）
 
 ```bash
 git add backend/app/api/v1/documents.py backend/app/schemas/document.py \
