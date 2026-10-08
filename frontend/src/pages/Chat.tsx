@@ -246,8 +246,8 @@ export default function Chat() {
   }
 
   return (
-    <Row gutter={16} style={{ height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
-      <Col span={5}>
+    <Row gutter={16} align="stretch" style={{ height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
+      <Col span={5} style={{ height: '100%' }}>
         <Card
           title="会话"
           size="small"
@@ -274,7 +274,7 @@ export default function Chat() {
               </Button>
             </Space>
           }
-          bodyStyle={{ padding: 0, flex: 1, minHeight: 0, overflow: 'hidden' }}
+          bodyStyle={{ padding: 0, flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
         >
           {multiSelect && (
             <div
@@ -352,7 +352,7 @@ export default function Chat() {
           />
         </Card>
       </Col>
-      <Col span={19}>
+      <Col span={19} style={{ height: '100%' }}>
         <Card
           size="small"
           style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
