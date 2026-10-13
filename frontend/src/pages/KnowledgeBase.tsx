@@ -253,11 +253,11 @@ export default function KnowledgeBase() {
     { title: '格式', dataIndex: 'file_type', key: 'type', width: 90 },
     { title: '大小', dataIndex: 'file_size', key: 'size', width: 90, render: (v: number | null) => formatSize(v) },
     {
-      title: '状态', dataIndex: 'status', key: 'status', width: 110,
+      title: '状态', dataIndex: 'status', key: 'status', width: 90,
       render: (v: DocStatus) => <Tag color={STATUS_COLOR[v]}>{STATUS_TEXT[v]}</Tag>,
     },
     {
-      title: '效力', key: 'governance', width: 210,
+      title: '效力', key: 'governance', width: 60,
       render: (_: unknown, doc: DocumentItem) => (
         <Space direction="vertical" size={2}>
           {doc.superseded_by
@@ -272,9 +272,9 @@ export default function KnowledgeBase() {
         </Space>
       ),
     },
-    { title: '上传时间', dataIndex: 'created_at', key: 'time', width: 170, render: (v: string) => formatTime(v) },
+    { title: '上传时间', dataIndex: 'created_at', key: 'time', width: 140, render: (v: string) => formatTime(v) },
     {
-      title: '操作', key: 'action', width: 120,
+      title: '操作', key: 'action', width: 100,
       render: (_: unknown, doc: DocumentItem) => (
         <Space>
           <Button
