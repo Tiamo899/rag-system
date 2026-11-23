@@ -22,6 +22,9 @@ def get_llm_provider() -> BaseLLM:
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
             model=settings.llm_model,
+            fallback_models=[
+                m.strip() for m in settings.llm_fallback_models.split(",") if m.strip()
+            ],
         )
     from app.services.llm.mock import MockLLM
 

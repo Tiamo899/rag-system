@@ -6,6 +6,8 @@ import {
   Empty,
   List,
   Row,
+  Space,
+  Tag,
   Typography,
   message,
 } from 'antd'
@@ -32,12 +34,16 @@ function useECharts() {
   const boxRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const chart = chartRef.current
-    const onResize = () => chart?.resize()
+    const box = boxRef.current
+    const onResize = () => chartRef.current?.resize()
     window.addEventListener('resize', onResize)
+    // 卡片高度随内容变化（等高等布局）时同步画布尺寸
+    const observer = box ? new ResizeObserver(onResize) : null
+    if (box && observer) observer.observe(box)
     return () => {
       window.removeEventListener('resize', onResize)
-      chart?.dispose()
+      observer?.disconnect()
+      chartRef.current?.dispose()
       chartRef.current = undefined
     }
   }, [])
@@ -66,8 +72,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (!stats) return
     pie.setOption({
-      tooltip: { trigger: 'item' },
-      legend: { bottom: 0 },
+      tooltip: { trigger: 'item', formatter: '{b}<br/>文档数：{c}（{d}%）' },
+      legend: {
+        bottom: 0,
+        left: 'center',
+        itemGap: 14,
+        itemWidth: 12,
+        itemHeight: 8,
+        textStyle: { fontSize: 12, color: '#475569' },
+        formatter: (name: string) => (name.length > 10 ? `${name.slice(0, 10)}…` : name),
+      },
       color: [
         '#6366f1', '#3b82f6', '#22d3ee', '#10b981', '#f59e0b', '#ec4899',
         '#8b5cf6', '#14b8a6', '#f43f5e', '#84cc16', '#6366f1', '#a855f7',
@@ -76,8 +90,15 @@ export default function Dashboard() {
         {
           name: '文档数',
           type: 'pie',
-          radius: ['42%', '72%'],
+          // 环图整体上移，把底部空间留给图例，避免标签与图例重叠
+          center: ['50%', '40%'],
+          radius: ['38%', '58%'],
           avoidLabelOverlap: true,
+          label: { show: true, fontSize: 12, color: '#334155', overflow: 'none', width: 120 },
+          labelLine: { show: true, length: 10, length2: 12, lineStyle: { color: '#cbd5e1' } },
+          emphasis: {
+            label: { show: true, fontSize: 13, fontWeight: 600, color: '#0f172a' },
+          },
           itemStyle: { borderRadius: 8, borderColor: '#fff', borderWidth: 3 },
           data: stats.kb_distribution.map((d) => ({ name: d.name, value: d.doc_count })),
         },
@@ -127,7 +148,7 @@ export default function Dashboard() {
     <div>
       <Row gutter={[16, 16]}>
         {cards.map((c) => (
-          <Col span={6} key={c.title}>
+          <Col xs={12} md={12} lg={6} key={c.title}>
             <Card className="stat-card lift-card" style={CARD_STYLE}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                 <span
@@ -160,7 +181,7 @@ export default function Dashboard() {
       </Row>
 
       <Row gutter={16} style={{ marginTop: 16 }}>
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <Card
             title={
               <span>
@@ -169,11 +190,12 @@ export default function Dashboard() {
               </span>
             }
             style={CARD_STYLE}
-            styles={{ body: { paddingTop: 8 } }}
+            styles={{ body: { height: 460, paddingTop: 8 } }}
           >
             {stats && stats.recent_sessions.length > 0 ? (
               <List
-                dataSource={stats.recent_sessions}
+                dataSource={stats.recent_sessions.slice(0, 6)}
+                style={{ maxHeight: 444, overflow: 'auto' }}
                 renderItem={(s) => (
                   <List.Item>
                     <List.Item.Meta
@@ -194,7 +216,12 @@ export default function Dashboard() {
                           <MessageOutlined />
                         </span>
                       }
-                      title={s.title || '新对话'}
+                      title={
+                        <Space size={6}>
+                          <span>{s.title || '新对话'}</span>
+                          {s.username ? <Tag color="geekblue">{s.username}</Tag> : null}
+                        </Space>
+                      }
                       description={s.preview || '（暂无消息）'}
                     />
                     <Typography.Text type="secondary" style={{ whiteSpace: 'nowrap', fontSize: 12 }}>
@@ -208,7 +235,7 @@ export default function Dashboard() {
             )}
           </Card>
         </Col>
-        <Col span={12}>
+        <Col xs={24} lg={12}>
           <Card
             title={
               <span>
@@ -217,8 +244,9 @@ export default function Dashboard() {
               </span>
             }
             style={CARD_STYLE}
+            styles={{ body: { height: 460, paddingTop: 8 } }}
           >
-            <div ref={pie.boxRef} style={{ height: 300 }} />
+            <div ref={pie.boxRef} style={{ width: '100%', height: '100%' }} />
           </Card>
         </Col>
       </Row>

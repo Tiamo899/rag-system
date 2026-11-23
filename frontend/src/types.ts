@@ -25,6 +25,9 @@ export interface KnowledgeBase {
   chunk_size: number
   chunk_overlap: number
   status: number
+  visibility?: 'public' | 'restricted'
+  allowed_roles?: string[]
+  allowed_users?: string[]
   created_at: string
 }
 
@@ -133,6 +136,7 @@ export interface RecentSessionStat {
   title: string
   updated_at: string
   preview: string
+  username?: string | null
 }
 
 export interface KBStat {

@@ -4,6 +4,7 @@ import { Avatar, Dropdown, Layout, Menu, Typography } from 'antd'
 import {
   DashboardOutlined,
   DatabaseOutlined,
+  ExperimentOutlined,
   LogoutOutlined,
   RobotOutlined,
   SettingOutlined,
@@ -17,6 +18,7 @@ import Chat from './pages/Chat'
 import AdminUsers from './pages/AdminUsers'
 import AdminRoles from './pages/AdminRoles'
 import AdminSettings from './pages/AdminSettings'
+import SearchDebug from './pages/SearchDebug'
 
 const { Sider, Header, Content } = Layout
 
@@ -24,6 +26,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/': '数据概览',
   '/knowledge-base': '知识库管理',
   '/chat': '智能问答',
+  '/search-debug': '检索调试',
   '/admin/users': '用户管理',
   '/admin/roles': '角色管理',
   '/admin/settings': '系统设置',
@@ -41,6 +44,7 @@ function Shell() {
     { key: '/', icon: <DashboardOutlined />, label: '数据概览' },
     { key: '/knowledge-base', icon: <DatabaseOutlined />, label: '知识库' },
     { key: '/chat', icon: <RobotOutlined />, label: '智能问答' },
+    { key: '/search-debug', icon: <ExperimentOutlined />, label: '检索调试' },
     ...(isAdmin
       ? [
           {
@@ -164,6 +168,7 @@ function Shell() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/knowledge-base" element={<KnowledgeBase />} />
             <Route path="/chat" element={<Chat />} />
+            <Route path="/search-debug" element={<SearchDebug />} />
             <Route path="/admin" element={adminRoute(<Navigate to="/admin/users" replace />)} />
             <Route path="/admin/users" element={adminRoute(<AdminUsers />)} />
             <Route path="/admin/roles" element={adminRoute(<AdminRoles />)} />

@@ -20,7 +20,9 @@ from app.schemas.chat import (
     ChatSessionCreate,
     ChatSessionOut,
 )
+from app.services.access import ensure_kb_visible, visible_kb_ids
 from app.services.llm.factory import get_llm_provider
+from app.services.rag.extractive import build_extractive_answer
 from app.services.rag.langgraph.graph import prepare_rag
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -56,6 +58,8 @@ async def create_session(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_permission("chat:use")),
 ):
+    if body.kb_id is not None:
+        await ensure_kb_visible(db, body.kb_id, user)
     session = ChatSession(
         title=body.title or "新对话",
         user_id=user.id,
@@ -111,6 +115,7 @@ async def update_session(
     if body.title is not None:
         session.title = body.title
     if body.kb_id is not None:
+        await ensure_kb_visible(db, body.kb_id, user)
         session.kb_id = body.kb_id
     await db.commit()
     await db.refresh(session)
@@ -137,6 +142,10 @@ async def send_message(
 ):
     session = await _get_session(db, session_id, user)
     kb_id = body.kb_id or session.kb_id
+    if kb_id is not None:
+        await ensure_kb_visible(db, kb_id, user)
+    # 检索范围收敛到当前用户可见的知识库（admin 返回 None = 不受限）
+    visible_kbs = await visible_kb_ids(db, user)
 
     # 本轮之前的历史（近 3 轮 = 6 条）。必须在落库当前消息之前查询，
     # 否则 history 会包含当前这条问题，改写拿到自指输入。
@@ -162,7 +171,10 @@ async def send_message(
             # 阶段 1：检索与评估
             yield {"event": "status", "data": json.dumps({"stage": "retrieving"})}
             plan = await prepare_rag(
-                body.content, str(kb_id) if kb_id else None, history=history
+                body.content,
+                str(kb_id) if kb_id else None,
+                history=history,
+                kb_ids=visible_kbs,
             )
 
             if plan["mode"] == "generate":
@@ -170,12 +182,40 @@ async def send_message(
                 yield {"event": "status", "data": json.dumps({"stage": "thinking"})}
                 llm = get_llm_provider()
                 prompt = plan["prompt"]
+                model_name = _current_model_name()
                 answer_parts: list[str] = []
-                async for token in llm.generate_stream(prompt):
-                    answer_parts.append(token)
-                    yield {"event": "token", "data": json.dumps({"text": token})}
-                answer = "".join(answer_parts)
-                sources = plan["sources"]
+                try:
+                    async for token in llm.generate_stream(prompt):
+                        answer_parts.append(token)
+                        yield {"event": "token", "data": json.dumps({"text": token})}
+                    answer = "".join(answer_parts)
+                    sources = plan["sources"]
+                    # 走备用模型时，落库/前端要展示真正产出的那个模型
+                    model_name = getattr(llm, "last_model", None) or model_name
+                except Exception as llm_exc:  # noqa: BLE001
+                    # LLM 欠费/超时/限流：不把整轮对话做成报错，降级为抽取式作答
+                    degraded_answer = build_extractive_answer(
+                        plan.get("question") or body.content, plan.get("context") or ""
+                    )
+                    if not degraded_answer:
+                        raise llm_exc
+                    answer_parts = []
+                    step = 8
+                    for i in range(0, len(degraded_answer), step):
+                        answer_parts.append(degraded_answer[i:i + step])
+                        yield {
+                            "event": "token",
+                            "data": json.dumps({"text": degraded_answer[i:i + step]}),
+                        }
+                    answer = degraded_answer
+                    sources = plan["sources"]
+                    model_name = "local-extractive"
+                    yield {
+                        "event": "status",
+                        "data": json.dumps(
+                            {"stage": "degraded", "reason": "LLM 服务不可用，已降级为原文抽取"}
+                        ),
+                    }
             else:
                 # direct / fallback：固定文案切块模拟流式
                 answer = plan["answer"] or ""
@@ -183,6 +223,7 @@ async def send_message(
                 step = 8
                 for i in range(0, len(answer), step):
                     yield {"event": "token", "data": json.dumps({"text": answer[i:i + step]})}
+                model_name = _current_model_name()
 
             # 落库 assistant 消息（SSE 生成器内自建会话）
             async with AsyncSessionLocal() as db2:
@@ -191,7 +232,7 @@ async def send_message(
                     role="assistant",
                     content=answer,
                     sources=sources,
-                    model=_current_model_name(),
+                    model=model_name,
                 )
                 db2.add(msg)
                 await db2.commit()
@@ -205,7 +246,8 @@ async def send_message(
                         "message_id": msg_id,
                         "answer": answer,
                         "sources": sources,
-                        "model": _current_model_name(),
+                        "model": model_name,
+                        "degraded": model_name == "local-extractive",
                     }
                 ),
             }

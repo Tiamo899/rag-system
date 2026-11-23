@@ -12,10 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.deps import require_permission
-from app.core.exceptions import AppError, NotFoundError
+from app.core.exceptions import AppError, ForbiddenError, NotFoundError
 from app.db.session import get_db
 from app.models import Document, KnowledgeBase, User
 from app.schemas.document import DocumentChunkOut, DocumentOut, DocumentUpdate
+from app.services.access import can_view_kb, ensure_kb_visible, get_visible_kb
 from app.services.chunking.splitter import derive_title, split_text
 from app.services.document_parser.factory import file_type_from_name, get_parser
 from app.services.vectorizer import trigger_vectorization
@@ -31,6 +32,15 @@ async def _get_doc(db: AsyncSession, doc_id: uuid.UUID) -> Document:
     return doc
 
 
+async def _get_doc_for_user(db: AsyncSession, doc_id: uuid.UUID, user: User) -> Document:
+    """文档的一切读写都继承所属知识库的可见范围。"""
+    doc = await _get_doc(db, doc_id)
+    kb = await db.get(KnowledgeBase, doc.kb_id)
+    if kb is None or not can_view_kb(kb, user):
+        raise ForbiddenError("无权访问该文档")
+    return doc
+
+
 @router.post("/knowledge-bases/{kb_id}/docs", response_model=DocumentOut, status_code=201)
 async def upload_document(
     kb_id: uuid.UUID,
@@ -43,12 +53,13 @@ async def upload_document(
     user: User = Depends(require_permission("doc:upload")),
 ) -> Document:
     settings = get_settings()
-    kb = await db.get(KnowledgeBase, kb_id)
-    if kb is None:
-        raise NotFoundError("知识库不存在")
+    kb = await get_visible_kb(db, kb_id, user)
 
     original_name = Path(file.filename or "untitled").name  # 防路径穿越
-    file_type = file_type_from_name(original_name)  # 不支持的格式直接 400
+    try:
+        file_type = file_type_from_name(original_name)
+    except ValueError as exc:
+        raise AppError(str(exc), code="UNSUPPORTED_FILE_TYPE", status_code=400) from exc
 
     data = await file.read()
     size_mb = settings.max_upload_size_mb * 1024 * 1024
@@ -106,8 +117,9 @@ async def list_documents(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_permission("doc:read")),
 ):
+    await ensure_kb_visible(db, kb_id, user)
     q = select(Document).where(Document.kb_id == kb_id)
     if active_only:
         q = q.where(Document.superseded_by.is_(None))
@@ -123,19 +135,19 @@ async def list_documents(
 async def get_document(
     doc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_permission("doc:read")),
 ):
-    return await _get_doc(db, doc_id)
+    return await _get_doc_for_user(db, doc_id, user)
 
 
 @router.post("/docs/{doc_id}/vectorize", status_code=202)
 async def trigger_vectorize(
     doc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission("doc:vectorize")),
+    user: User = Depends(require_permission("doc:vectorize")),
 ):
     """手动触发向量化（小眼睛）。异步执行，前端轮询 GET /docs/{id} 看状态。"""
-    doc = await _get_doc(db, doc_id)
+    doc = await _get_doc_for_user(db, doc_id, user)
     if doc.status == "processing":
         raise AppError("文档正在向量化中", code="ALREADY_PROCESSING", status_code=409)
     trigger_vectorization(doc_id)
@@ -146,10 +158,10 @@ async def trigger_vectorize(
 async def preview_chunks(
     doc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission("doc:read")),
+    user: User = Depends(require_permission("doc:read")),
 ):
     """解析 + 分块预览（不落库；向量化时才会持久化分块）。"""
-    doc = await _get_doc(db, doc_id)
+    doc = await _get_doc_for_user(db, doc_id, user)
     kb = await db.get(KnowledgeBase, doc.kb_id)
     parser = get_parser(doc.file_type)
     text = await asyncio.to_thread(parser.parse, doc.file_path)
@@ -174,10 +186,10 @@ async def update_document(
     doc_id: uuid.UUID,
     body: DocumentUpdate,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission("doc:update")),
+    user: User = Depends(require_permission("doc:update")),
 ):
     """更新时效/版本字段（局部）。更新后同步 ES metadata，零重新向量化。"""
-    doc = await _get_doc(db, doc_id)
+    doc = await _get_doc_for_user(db, doc_id, user)
     # 区间校验按「合并后的生效值」算——只改一个字段也必须拦截坏区间
     new_from = body.valid_from if "valid_from" in body.model_fields_set else doc.valid_from
     new_to = body.valid_to if "valid_to" in body.model_fields_set else doc.valid_to
@@ -231,9 +243,9 @@ async def _sync_es_metadata(doc: Document) -> None:
 async def delete_document(
     doc_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user: User = Depends(require_permission("doc:delete")),
+    user: User = Depends(require_permission("doc:delete")),
 ):
-    doc = await _get_doc(db, doc_id)
+    doc = await _get_doc_for_user(db, doc_id, user)
     file_path = doc.file_path
     # 先清 ES（与 PG 无跨库事务，取「先 ES 后 DB」）
     try:

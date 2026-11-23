@@ -9,6 +9,8 @@
 - **混合检索**：Elasticsearch 向量 + 关键词混合检索（RRF 融合），余弦相似度二次验证兜底
 - **智能问答**：会话管理，SSE 流式输出，答案附带来源引用，消息点赞/点踩
 - **权限体系**：JWT 认证，admin / editor / viewer 角色，权限点 `模块:动作`，内置用户/角色管理护栏
+- **知识库可见范围**：库级 `public` / `restricted`，按真实角色与指定用户授权，覆盖知识库、文档、会话与检索全链路
+- **检索调试台**：展示向量/关键词各路召回、RRF 融合分数、余弦复核与最终上下文，便于定位检索质量问题
 - **管理后台**：概览统计（ECharts）、系统配置（LLM/Embedding/分块参数）
 - **双 Provider**：LLM 与 Embedding 均支持 `mock` / OpenAI 兼容接口，key 缺失明确报错不静默降级
 
@@ -26,6 +28,7 @@
 ```bash
 git clone https://github.com/Tiamo899/rag-system.git
 cd rag-system
+cp .env.example .env   # 可选：填入 LLM / Embedding Key；不配置则按 compose 默认 mock 演示
 docker compose up -d --build
 ```
 
@@ -54,7 +57,12 @@ npm run dev
 
 ## 接入真实模型
 
-默认 mock 演示。在根目录 `.env` 配置 OpenAI 兼容的 LLM 与 Embedding（DeepSeek / 硅基流动等），重启后端即可生效。维度约束、索引重建等注意事项见 [DEPLOY.md](DEPLOY.md) 的「模型配置」章节。
+默认 mock 演示。把根目录 `.env.example` 复制为 `.env`，填入 Key 后重启后端即可：
+
+- **LLM**：智谱 GLM（OpenAI 兼容），主模型 `glm-4-flash-250414`，限流时按 `LLM_FALLBACK_MODELS` 降级到 `glm-4.7-flash`
+- **Embedding**：硅基流动 `BAAI/bge-m3`，1024 维
+
+Key 只写入 `.env`，该文件已被忽略、不会进仓库。维度约束、索引重建等注意事项见 [DEPLOY.md](DEPLOY.md) 的「模型配置」章节。
 
 ## 项目结构
 

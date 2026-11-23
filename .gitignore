@@ -5,9 +5,14 @@ __pycache__/
 .venv/
 .pytest_cache/
 
-# env
+# env（模板保留，密钥与备份一律忽略）
 .env
+.env.*
+!.env.example
 *.local
+
+# logs
+*.log
 
 # build output
 dist/
@@ -21,5 +26,6 @@ build/
 .vscode/
 *.iml
 
-# worktrees
+# worktrees / agent workspace
 .worktrees/
+.claude/

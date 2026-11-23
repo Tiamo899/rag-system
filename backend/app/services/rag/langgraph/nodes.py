@@ -9,6 +9,8 @@ from app.services.llm.factory import get_llm_provider
 from app.services.llm.mock import FALLBACK_TEXT
 from app.services.rag.langgraph.state import RAGState
 from app.services.search.hybrid import hybrid_search
+from app.services.search.postprocess import diversify, expand_with_neighbors, strip_boilerplate
+from app.services.search.relevance import decide_relevance
 
 _settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -17,6 +19,11 @@ _GREETINGS = ("你好", "您好", "hi", "hello", "hey", "早上好", "下午好"
 
 MULTI_SOURCE_NOTICE = (
     "\n[提示] 以上资料来自多份文档，若规定不一致，请指出差异并以生效日期较新者为准。"
+)
+
+DEGRADED_NOTICE = (
+    "\n[提示] 向量检索服务暂不可用，以上资料来自关键词检索，"
+    "回答时请说明检索范围可能不完整。"
 )
 
 PROMPT_TRUNCATE = 300  # 进入改写/生成 prompt 的单条消息截断长度
@@ -86,7 +93,10 @@ async def retrieve_node(state: RAGState) -> dict:
         state.get("kb_id"),
         top_k=5,
         search_type="hybrid",
+        kb_ids=state.get("kb_ids"),
     )
+    # 命中块补上同文档相邻段落，避免「但下列情形除外」这类限定条件被切在邻块丢失
+    chunks = await expand_with_neighbors(chunks)
     return {"retrieved_chunks": chunks}
 
 
@@ -110,12 +120,12 @@ async def evaluate_node(state: RAGState) -> dict:
     """
     chunks = state.get("retrieved_chunks") or []
     if not chunks:
-        return {"has_relevant_content": False, "context": ""}
+        return {"has_relevant_content": False, "context": "", "degraded": False}
     query = state.get("standalone_query") or state["question"]
     top_score = max(c["score"] for c in chunks)
-    rrf_ok = top_score >= _settings.relevance_threshold
 
-    cos_ok = False
+    cos_available = False
+    best_cos = 0.0
     try:
         provider = get_embedding_provider()
         query_vector = (await provider.embed_texts([query]))[0]
@@ -124,9 +134,18 @@ async def evaluate_node(state: RAGState) -> dict:
             for c in chunks
             if c.get("content_vector")
         )
-        cos_ok = best_cos >= _settings.relevance_cos_threshold
+        cos_available = True
     except Exception:  # noqa: BLE001 —— 语义验证失败不影响 RRF 判定
         pass
+
+    decision = decide_relevance(
+        top_rrf=top_score,
+        top_cosine=best_cos,
+        rrf_threshold=_settings.relevance_threshold,
+        cos_threshold=_settings.relevance_cos_threshold,
+        cos_available=cos_available,
+        has_candidates=True,
+    )
 
     def _fmt(i: int, c: dict) -> str:
         name = c.get("title") or c.get("doc_name") or "资料"
@@ -136,21 +155,37 @@ async def evaluate_node(state: RAGState) -> dict:
         if c.get("valid_from"):
             meta_parts.append(f"生效{c['valid_from']}")
         meta = f"（{'，'.join(meta_parts)}）" if meta_parts else ""
-        return f"[{i + 1}] 《{name}》{meta}：{c['content']}"
+        body = strip_boilerplate(c["content"])
+        return f"[{i + 1}] 《{name}》{meta}：{body}"
 
-    lines = [_fmt(i, c) for i, c in enumerate(chunks[:3])]
-    doc_ids = {c.get("doc_id") for c in chunks[:3] if c.get("doc_id")}
+    # 来源去重：限制同一文档最多占 2 个引用位，剩下的位置给其它文档，提升信息覆盖
+    selected = diversify(
+        chunks, limit=3, max_per_doc=2, budget_chars=_settings.ctx_budget_chars
+    )
+
+    lines = [_fmt(i, c) for i, c in enumerate(selected)]
+    doc_ids = {c.get("doc_id") for c in selected if c.get("doc_id")}
     context = "\n".join(lines)
     if len(doc_ids) >= 2:
         context += MULTI_SOURCE_NOTICE
-    return {"has_relevant_content": rrf_ok or cos_ok, "context": context}
+    if decision.degraded:
+        context += DEGRADED_NOTICE
+    return {
+        "has_relevant_content": decision.is_relevant,
+        "context": context,
+        "degraded": decision.degraded,
+        "selected_chunks": selected,
+    }
 
 
 async def generate_node(state: RAGState, llm: BaseLLM) -> dict:
     prompt = f"{state.get('context') or ''}\n\n问题：{state['question']}"
     answer = await llm.generate(prompt)
-    # 引用来源只保留回答实际引用的前 3 条，避免与 [n] 编号不一致
-    return {"answer": answer, "sources": (state.get("retrieved_chunks") or [])[:3]}
+    # 引用来源与上下文用同一批块，保证 [n] 编号与来源一致
+    return {
+        "answer": answer,
+        "sources": state.get("selected_chunks") or (state.get("retrieved_chunks") or [])[:3],
+    }
 
 
 def fallback_node(state: RAGState) -> dict:

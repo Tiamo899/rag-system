@@ -5,7 +5,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -15,7 +15,7 @@ from app.core.exceptions import AppError, NotFoundError
 from app.core.security.password import hash_password
 from app.core.security.rbac import collect_permissions
 from app.db.session import get_db
-from app.models import Role, User
+from app.models import ChatSession, Document, KnowledgeBase, Role, User
 from app.schemas.auth import UserOut
 from app.schemas.users import UserCreate, UserPage, UserUpdate
 
@@ -163,5 +163,23 @@ async def delete_user(
         raise AppError("不能删除当前登录账号", code="SELF_DELETE", status_code=400)
     if any(r.name == "admin" for r in target.roles):
         raise AppError("不能删除管理员账号", code="ADMIN_DELETE", status_code=400)
+
+    # 该用户创建的内容不能随账号静默消失：先让管理员转移或删除
+    owned_kbs = await db.scalar(
+        select(func.count(KnowledgeBase.id)).where(KnowledgeBase.created_by == target.id)
+    ) or 0
+    owned_docs = await db.scalar(
+        select(func.count(Document.id)).where(Document.created_by == target.id)
+    ) or 0
+    if owned_kbs or owned_docs:
+        raise AppError(
+            f"该用户创建了 {owned_kbs} 个知识库、{owned_docs} 篇文档，"
+            "请先删除这些内容或转移归属后再删除账号",
+            code="USER_HAS_CONTENT",
+            status_code=409,
+        )
+
+    # 会话随账号一起清理（chat_messages 由外键 CASCADE 跟随 session 删除）
+    await db.execute(delete(ChatSession).where(ChatSession.user_id == target.id))
     await db.delete(target)
     await db.commit()

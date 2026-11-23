@@ -253,7 +253,7 @@ def test_chat_history_excludes_current_message(client, admin_headers, prepared_k
 
     captured = []
 
-    async def spy(question, kb_id, history=None):
+    async def spy(question, kb_id, history=None, kb_ids=None):
         captured.append({"q": question, "history": history})
         return {"mode": "direct", "answer": "收到", "sources": [],
                 "question": question, "prompt": ""}

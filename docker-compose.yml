@@ -77,11 +77,15 @@ services:
       RELEVANCE_THRESHOLD: ${RELEVANCE_THRESHOLD:-0.02}
       # 语义二次验证：RRF 或 余弦任一达标即相关（bge-m3 真相关 0.64+，无关 <0.45）
       RELEVANCE_COS_THRESHOLD: ${RELEVANCE_COS_THRESHOLD:-0.5}
+      # 拼进 prompt 的 3 条来源合计字符预算（过小会丢跨文档条款，过大拖慢生成）
+      CTX_BUDGET_CHARS: ${CTX_BUDGET_CHARS:-2600}
       # 模型 Provider（真实 key 放根目录 .env，不进镜像）
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com}
       LLM_MODEL: ${LLM_MODEL:-deepseek-v4-flash}
+      # 备用模型链（逗号分隔）：主模型限流/不可用时依次降级
+      LLM_FALLBACK_MODELS: ${LLM_FALLBACK_MODELS:-}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-https://api.openai.com/v1}

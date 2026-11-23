@@ -10,6 +10,7 @@ class RecentSessionStat(BaseModel):
     title: str
     updated_at: datetime
     preview: str
+    username: str | None = None  # 会话归属账号，概览为全局口径时必须可见
 
 
 class KBStat(BaseModel):

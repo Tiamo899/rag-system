@@ -178,3 +178,63 @@ def test_viewer_cannot_access_users(client):
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     resp = client.get("/api/v1/users", headers=headers)
     assert resp.status_code == 403
+
+
+def test_delete_user_cleans_own_sessions(client, admin_headers):
+    """有历史会话的账号应可删除：会话先清理，不能再因外键约束失败。"""
+    tag = uuid.uuid4().hex[:8]
+    uname = f"del_{tag}"
+    resp = client.post(
+        "/api/v1/users",
+        json={"username": uname, "email": f"{uname}@test.com", "password": "pass123456",
+              "role_ids": [_viewer_role_id(client, admin_headers)], "status": 1},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    user_id = resp.json()["id"]
+
+    login = client.post("/api/v1/auth/login", json={"username": uname, "password": "pass123456"})
+    user_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    resp = client.post("/api/v1/chat/sessions", json={}, headers=user_headers)
+    assert resp.status_code == 201, resp.text
+
+    resp = client.delete(f"/api/v1/users/{user_id}", headers=admin_headers)
+    assert resp.status_code == 204, resp.text
+    # 账号确实不可登录（会话已被清理，未残留悬挂用户）
+    assert client.post(
+        "/api/v1/auth/login", json={"username": uname, "password": "pass123456"}
+    ).status_code == 401
+
+
+def test_delete_user_with_owned_kb_is_refused(client, admin_headers):
+    """创建了知识库的账号不能直接删，避免库归属断裂。"""
+    tag = uuid.uuid4().hex[:8]
+    uname = f"own_{tag}"
+    editor_id = next(
+        r["id"] for r in client.get("/api/v1/roles", headers=admin_headers).json()
+        if r["name"] == "editor"
+    )
+    resp = client.post(
+        "/api/v1/users",
+        json={"username": uname, "email": f"{uname}@test.com", "password": "pass123456",
+              "role_ids": [editor_id], "status": 1},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    user_id = resp.json()["id"]
+    login = client.post("/api/v1/auth/login", json={"username": uname, "password": "pass123456"})
+    user_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    kb = client.post(
+        "/api/v1/knowledge-bases",
+        json={"name": f"归属库_{tag}"},
+        headers=user_headers,
+    )
+    assert kb.status_code == 201, kb.text
+    kb_id = kb.json()["id"]
+
+    resp = client.delete(f"/api/v1/users/{user_id}", headers=admin_headers)
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "USER_HAS_CONTENT"
+
+    assert client.delete(f"/api/v1/knowledge-bases/{kb_id}", headers=user_headers).status_code in (200, 204)
+    assert client.delete(f"/api/v1/users/{user_id}", headers=admin_headers).status_code == 204

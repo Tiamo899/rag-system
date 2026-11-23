@@ -52,6 +52,7 @@ interface Bubble {
   sources: Source[]
   id?: string
   feedback?: 'like' | 'dislike' | null
+  degraded?: boolean
 }
 
 export default function Chat() {
@@ -215,10 +216,22 @@ export default function Chat() {
             setPhase('generating')
             setStreaming((prev) => prev + d.text)
           } else if (frame.event === 'done') {
-            const d = frame.data as { message_id: string; answer: string; sources: Source[] }
+            const d = frame.data as {
+              message_id: string
+              answer: string
+              sources: Source[]
+              degraded?: boolean
+            }
             setMessages((prev) => [
               ...prev,
-              { role: 'assistant', content: d.answer, sources: d.sources, id: d.message_id, feedback: null },
+              {
+                role: 'assistant',
+                content: d.answer,
+                sources: d.sources,
+                id: d.message_id,
+                feedback: null,
+                degraded: d.degraded,
+              },
             ])
             setStreaming('')
             setPhase('idle')
@@ -247,7 +260,7 @@ export default function Chat() {
 
   return (
     <Row gutter={16} align="stretch" style={{ height: 'calc(100vh - 150px)', overflow: 'hidden' }}>
-      <Col span={5} style={{ height: '100%' }}>
+      <Col xs={24} lg={7} xl={6} style={{ height: '100%' }}>
         <Card
           title="会话"
           size="small"
@@ -317,6 +330,9 @@ export default function Chat() {
                 style={{
                   cursor: 'pointer',
                   padding: '10px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  flexWrap: 'nowrap',
                   background: multiSelect && selectedSessions.includes(s.id) ? '#eef2ff' : undefined,
                 }}
                 actions={
@@ -346,13 +362,25 @@ export default function Chat() {
                     onChange={() => toggleSelect(s.id)}
                   />
                 )}
-                <span style={{ marginLeft: multiSelect ? 8 : 0 }}>{s.title || '新对话'}</span>
+                <span
+                  style={{
+                    marginLeft: multiSelect ? 8 : 0,
+                    flex: 1,
+                    minWidth: 0,
+                    display: 'block',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {s.title || '新对话'}
+                </span>
               </List.Item>
             )}
           />
         </Card>
       </Col>
-      <Col span={19} style={{ height: '100%' }}>
+      <Col xs={24} lg={17} xl={18} style={{ height: '100%' }}>
         <Card
           size="small"
           style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
@@ -442,6 +470,13 @@ export default function Chat() {
                         style={{ ...bubbleStyle[m.role], flex: m.role === 'assistant' ? 1 : undefined }}
                       >
                         {m.role === 'assistant' ? <ReactMarkdown>{m.content}</ReactMarkdown> : m.content}
+                        {m.role === 'assistant' && m.degraded && (
+                          <div style={{ marginTop: 10 }}>
+                            <Tag color="warning" bordered={false}>
+                              答案由原文抽取生成 · 大模型服务暂不可用
+                            </Tag>
+                          </div>
+                        )}
                         {m.role === 'assistant' && m.sources.length > 0 && (
                           <div style={{ marginTop: 10 }}>
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>引用来源：</Typography.Text>

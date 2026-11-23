@@ -14,11 +14,13 @@ import {
   Modal,
   Popconfirm,
   Row,
+  Select,
   Space,
   Spin,
   Switch,
   Table,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from 'antd'
@@ -35,13 +37,16 @@ import {
   deleteDocument,
   deleteKnowledgeBase,
   fetchChunks,
+  fetchKbAccessOptions,
   listDocuments,
   listKnowledgeBases,
   triggerVectorize,
+  updateKnowledgeBase,
   uploadDocument,
 } from '../api/kb'
-import type { UploadDocOptions } from '../api/kb'
+import type { KbAccessOptions, UploadDocOptions } from '../api/kb'
 import { getErrorMessage } from '../api/http'
+import { SettingOutlined } from '@ant-design/icons'
 import { formatTime } from '../utils/time'
 import type { DocumentChunk, DocumentItem, DocStatus, KnowledgeBase } from '../types'
 
@@ -59,11 +64,98 @@ const STATUS_TEXT: Record<DocStatus, string> = {
   failed: '失败',
 }
 
+const FILE_TYPE_TEXT: Record<string, string> = {
+  pdf: 'PDF',
+  word: 'Word',
+  markdown: 'Markdown',
+  txt: 'TXT',
+}
+
 function formatSize(bytes?: number | null): string {
   if (!bytes) return '-'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function VisibilityFields({ accessOptions }: { accessOptions: KbAccessOptions }) {
+  return (
+    <>
+      <Form.Item
+        name="visibility"
+        label="可见范围"
+        initialValue="public"
+        extra="受限知识库仅创建人、admin 与所选角色/用户可见，也不会进入其他人的检索范围"
+      >
+        <Select
+          options={[
+            { value: 'public', label: '公开：所有登录用户可见' },
+            { value: 'restricted', label: '受限：仅指定角色或用户可见' },
+          ]}
+        />
+      </Form.Item>
+      <Form.Item noStyle shouldUpdate={(prev, cur) => prev.visibility !== cur.visibility}>
+        {({ getFieldValue }) =>
+          getFieldValue('visibility') === 'restricted' ? (
+            <>
+              <Form.Item
+                name="allowed_roles"
+                label="可见角色"
+                dependencies={['allowed_users']}
+                extra="只读取系统真实角色，不能手输；与指定用户同时生效时取并集"
+                rules={[
+                  ({ getFieldValue: get }) => ({
+                    validator(_, value) {
+                      if (value?.length || get('allowed_users')?.length) return Promise.resolve()
+                      return Promise.reject(new Error('角色与指定用户至少选择一个'))
+                    },
+                  }),
+                ]}
+              >
+                <Select
+                  mode="multiple"
+                  placeholder="选择角色"
+                  options={accessOptions.roles.map((r) => ({ value: r, label: r }))}
+                  notFoundContent="暂无角色"
+                />
+              </Form.Item>
+              <Form.Item
+                name="allowed_users"
+                label="指定用户"
+                dependencies={['allowed_roles']}
+                extra={
+                  accessOptions.can_grant_users
+                    ? '按用户名或邮箱搜索，仅这些账号能访问该库'
+                    : '指定用户需要管理员权限（user:manage），当前账号只能按角色授权'
+                }
+                rules={[
+                  ({ getFieldValue: get }) => ({
+                    validator(_, value) {
+                      if (value?.length || get('allowed_roles')?.length) return Promise.resolve()
+                      return Promise.reject(new Error('角色与指定用户至少选择一个'))
+                    },
+                  }),
+                ]}
+              >
+                <Select
+                  mode="multiple"
+                  showSearch
+                  optionFilterProp="label"
+                  disabled={!accessOptions.can_grant_users}
+                  placeholder="选择用户"
+                  options={accessOptions.users.map((u) => ({
+                    value: u.id,
+                    label: `${u.username}（${u.email}）`,
+                  }))}
+                  notFoundContent="暂无用户"
+                />
+              </Form.Item>
+            </>
+          ) : null
+        }
+      </Form.Item>
+    </>
+  )
 }
 
 export default function KnowledgeBase() {
@@ -88,6 +180,15 @@ export default function KnowledgeBase() {
 
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm()
+  const [editKb, setEditKb] = useState<KnowledgeBase | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm] = Form.useForm()
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [accessOptions, setAccessOptions] = useState<KbAccessOptions>({
+    roles: [],
+    users: [],
+    can_grant_users: false,
+  })
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [drawerDoc, setDrawerDoc] = useState<DocumentItem | null>(null)
@@ -120,6 +221,9 @@ export default function KnowledgeBase() {
 
   useEffect(() => {
     loadKbs()
+    fetchKbAccessOptions()
+      .then(setAccessOptions)
+      .catch(() => undefined)
   }, [loadKbs])
 
   useEffect(() => {
@@ -148,7 +252,13 @@ export default function KnowledgeBase() {
   const handleCreate = async () => {
     const values = await createForm.validateFields()
     try {
-      await createKnowledgeBase({ name: values.name, description: values.description })
+      await createKnowledgeBase({
+        name: values.name,
+        description: values.description,
+        visibility: values.visibility ?? 'public',
+        allowed_roles: values.visibility === 'restricted' ? values.allowed_roles ?? [] : [],
+        allowed_users: values.visibility === 'restricted' ? values.allowed_users ?? [] : [],
+      })
       message.success('知识库创建成功')
       setCreateOpen(false)
       createForm.resetFields()
@@ -158,12 +268,49 @@ export default function KnowledgeBase() {
     }
   }
 
+  const openEdit = (kb: KnowledgeBase) => {
+    setEditKb(kb)
+    editForm.setFieldsValue({
+      name: kb.name,
+      description: kb.description ?? '',
+      visibility: kb.visibility ?? 'public',
+      allowed_roles: kb.allowed_roles ?? [],
+      allowed_users: kb.allowed_users ?? [],
+    })
+    setEditOpen(true)
+  }
+
+  const handleEditOk = async () => {
+    if (!editKb) return
+    const values = await editForm.validateFields()
+    setEditSubmitting(true)
+    try {
+      await updateKnowledgeBase(editKb.id, {
+        name: values.name,
+        description: values.description ?? '',
+        visibility: values.visibility ?? 'public',
+        allowed_roles: values.visibility === 'restricted' ? values.allowed_roles ?? [] : [],
+        allowed_users: values.visibility === 'restricted' ? values.allowed_users ?? [] : [],
+      })
+      message.success('知识库设置已更新')
+      setEditOpen(false)
+      await loadKbs()
+    } catch (e) {
+      message.error(getErrorMessage(e))
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
+
   const doUpload = async (file: File, opts?: UploadDocOptions) => {
     if (!selectedKbId) return
     try {
-      await uploadDocument(selectedKbId, file, opts)
-      message.success(`「${file.name}」上传成功`)
+      const uploaded = await uploadDocument(selectedKbId, file, opts)
+      message.success(`「${file.name}」上传成功，正在解析…`)
       loadDocs(selectedKbId, search || undefined, activeOnly)
+      // 上传后直接建索引，不用再点一次「查看分块」才触发
+      await triggerVectorize(uploaded.id)
+      pollDocStatus(uploaded.id)
     } catch (e) {
       message.error(getErrorMessage(e))
     }
@@ -250,7 +397,13 @@ export default function KnowledgeBase() {
 
   const columns = [
     { title: '文档名称', dataIndex: 'original_name', key: 'name', ellipsis: true },
-    { title: '格式', dataIndex: 'file_type', key: 'type', width: 90 },
+    {
+      title: '格式',
+      dataIndex: 'file_type',
+      key: 'type',
+      width: 90,
+      render: (v: string) => FILE_TYPE_TEXT[v] ?? v.toUpperCase(),
+    },
     { title: '大小', dataIndex: 'file_size', key: 'size', width: 90, render: (v: number | null) => formatSize(v) },
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 90,
@@ -294,7 +447,7 @@ export default function KnowledgeBase() {
 
   return (
     <Row gutter={16}>
-      <Col span={5}>
+      <Col flex="0 0 300px">
         <Card
           title="知识库"
           size="small"
@@ -306,34 +459,79 @@ export default function KnowledgeBase() {
         >
           <List
             dataSource={kbs}
-            style={{ maxHeight: '70vh', overflow: 'auto' }}
+            style={{ maxHeight: '70vh', overflow: 'auto', paddingRight: 4 }}
             locale={{ emptyText: <Empty description="暂无知识库" /> }}
-            renderItem={(kb) => (
-              <List.Item
-                onClick={() => setSelectedKbId(kb.id)}
-                style={{
-                  cursor: 'pointer',
-                  borderRadius: 10,
-                  padding: '8px 12px',
-                  background: kb.id === selectedKbId ? '#eef2ff' : 'transparent',
-                }}
-                actions={[
-                  <Popconfirm
-                    key="del"
-                    title="删除知识库将同时删除其下所有文档"
-                    onConfirm={() => handleDeleteKb(kb.id)}
-                  >
-                    <Button type="text" size="small" danger icon={<DeleteOutlined />} onClick={(e) => e.stopPropagation()} />
-                  </Popconfirm>,
-                ]}
-              >
-                <List.Item.Meta title={kb.name} description={kb.description} />
-              </List.Item>
-            )}
+            renderItem={(kb) => {
+              const active = kb.id === selectedKbId
+              return (
+                <div
+                  onClick={() => setSelectedKbId(kb.id)}
+                  style={{
+                    cursor: 'pointer',
+                    borderRadius: 10,
+                    padding: '10px 10px 10px 12px',
+                    marginBottom: 8,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: active ? '#eef2ff' : '#fafafa',
+                    border: active ? '1px solid #c7d2fe' : '1px solid #f0f0f0',
+                    boxShadow: active ? '0 2px 8px rgba(79,70,229,.12)' : 'none',
+                    transition: 'all .15s ease',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Tooltip title={kb.name} placement="right">
+                      <Typography.Text
+                        strong
+                        style={{
+                          display: 'block',
+                          fontSize: 14,
+                          lineHeight: '20px',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {kb.name}
+                      </Typography.Text>
+                    </Tooltip>
+                    <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {kb.visibility === 'restricted'
+                        ? <Tag color="orange" style={{ marginInlineEnd: 0 }}>受限</Tag>
+                        : <Tag color="blue" style={{ marginInlineEnd: 0 }}>公开</Tag>}
+                      {kb.description ? (
+                        <Typography.Text
+                          type="secondary"
+                          ellipsis
+                          style={{ fontSize: 12, flex: 1, minWidth: 0 }}
+                        >
+                          {kb.description}
+                        </Typography.Text>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Space size={0} onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<SettingOutlined />}
+                      onClick={() => openEdit(kb)}
+                    />
+                    <Popconfirm
+                      title="删除知识库将同时删除其下所有文档"
+                      onConfirm={() => handleDeleteKb(kb.id)}
+                    >
+                      <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+                    </Popconfirm>
+                  </Space>
+                </div>
+              )
+            }}
           />
         </Card>
       </Col>
-      <Col span={19}>
+      <Col flex="1 1 0" style={{ minWidth: 0 }}>
         <Card
           title={selectedKb?.name ?? '选择知识库'}
           extra={
@@ -388,6 +586,27 @@ export default function KnowledgeBase() {
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} placeholder="可选" />
           </Form.Item>
+          <VisibilityFields accessOptions={accessOptions} />
+        </Form>
+      </Modal>
+
+      <Modal
+        title={editKb ? `知识库设置 · ${editKb.name}` : '知识库设置'}
+        open={editOpen}
+        onOk={handleEditOk}
+        onCancel={() => setEditOpen(false)}
+        okText="保存"
+        confirmLoading={editSubmitting}
+        destroyOnClose
+      >
+        <Form form={editForm} layout="vertical" style={{ marginTop: 12 }}>
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item name="description" label="描述">
+            <Input.TextArea rows={2} placeholder="可选" />
+          </Form.Item>
+          <VisibilityFields accessOptions={accessOptions} />
         </Form>
       </Modal>
 

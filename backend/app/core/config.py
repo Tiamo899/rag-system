@@ -41,12 +41,17 @@ class Settings(BaseSettings):
     # 语义二次验证阈值：query 与 top chunk 的余弦相似度（RRF 分不可靠时兜底）。
     # RRF 或余弦任一达标即判定相关。bge-m3 实测：真相关 0.64+，真无关 <0.45
     relevance_cos_threshold: float = 0.5
+    # 上下文预算：拼进 prompt 的 3 条来源合计字符上限。太小会丢跨文档条款（多跳问题
+    # 直接答「无法回答」），太大会拖慢生成并增加串号风险；2600 为实测平衡点。
+    ctx_budget_chars: int = 2600
 
     # ---- LLM（OpenAI 兼容 chat completions，默认 DeepSeek）----
     llm_api_key: str = ""
     llm_base_url: str = "https://api.deepseek.com"
     # 2026-07 起 deepseek-chat 停用，官方模型为 deepseek-v4-flash / deepseek-v4-pro
     llm_model: str = "deepseek-v4-flash"
+    # 备用模型链（逗号分隔）：主模型 429/不可用时依次降级；留空则只用主模型
+    llm_fallback_models: str = ""
 
     # ---- Embedding（OpenAI 兼容 embeddings，默认 OpenAI）----
     embedding_api_key: str = ""

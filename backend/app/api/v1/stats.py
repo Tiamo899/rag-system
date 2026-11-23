@@ -17,7 +17,7 @@ from app.schemas.stats import (
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
-_RECENT_LIMIT = 10
+_RECENT_LIMIT = 6
 _TREND_DAYS = 7
 
 
@@ -47,13 +47,16 @@ async def overview(
     )
 
     # 2. 最近会话 + 各自首条用户消息摘要（两轮查询，无 N+1）
-    sessions = (
+    rows = (
         await db.execute(
-            select(ChatSession)
+            select(ChatSession, User.username)
+            .outerjoin(User, User.id == ChatSession.user_id)
             .order_by(ChatSession.updated_at.desc())
             .limit(_RECENT_LIMIT)
         )
-    ).scalars().all()
+    ).all()
+    sessions = [r[0] for r in rows]
+    owner_map = {str(r[0].id): r[1] for r in rows}
     preview_map: dict[str, str] = {}
     if sessions:
         first_msgs = (
@@ -78,6 +81,7 @@ async def overview(
             title=s.title,
             updated_at=s.updated_at,
             preview=(preview_map.get(str(s.id)) or "")[:60],
+            username=owner_map.get(str(s.id)),
         )
         for s in sessions
     ]

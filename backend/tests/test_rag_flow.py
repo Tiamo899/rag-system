@@ -9,8 +9,9 @@ def test_retrieve_uses_standalone_query(monkeypatch):
     """检索必须用改写后的问句，不是 raw question（否则改写白做）。"""
     seen = {}
 
-    async def spy(query, kb_id, top_k=5, search_type="hybrid"):
+    async def spy(query, kb_id, top_k=5, search_type="hybrid", kb_ids=None):
         seen["query"] = query
+        seen["kb_ids"] = kb_ids
         return []
 
     monkeypatch.setattr(nodes, "hybrid_search", spy)
@@ -26,7 +27,7 @@ def test_retrieve_without_rewrite_falls_back_to_question(monkeypatch):
     """standalone_query 缺失（防御）→ 用原问题，不崩。"""
     seen = {}
 
-    async def spy(query, kb_id, top_k=5, search_type="hybrid"):
+    async def spy(query, kb_id, top_k=5, search_type="hybrid", kb_ids=None):
         seen["query"] = query
         return []
 
@@ -124,7 +125,7 @@ def test_prepare_rag_kb_path_calls_rewrite_and_feeds_retrieve(monkeypatch):
     )
     seen = {}
 
-    async def spy(query, kb_id, top_k=5, search_type="hybrid"):
+    async def spy(query, kb_id, top_k=5, search_type="hybrid", kb_ids=None):
         seen["query"] = query
         return []
 
@@ -134,3 +135,37 @@ def test_prepare_rag_kb_path_calls_rewrite_and_feeds_retrieve(monkeypatch):
     )
     assert seen["query"] == "改写后独立问题"   # rewrite 被调用且输出进检索
     assert plan["mode"] in ("fallback", "generate")  # 检索空 → fallback，流程不崩
+
+
+def test_retrieve_forwards_visible_kb_ids(monkeypatch):
+    """可见库集合必须原样下传到检索层；否则全库检索会越过权限边界。"""
+    from app.services.rag.langgraph import nodes
+
+    seen = {}
+
+    async def spy(query, kb_id, top_k=5, search_type="hybrid", kb_ids=None):
+        seen["kb_ids"] = kb_ids
+        return []
+
+    monkeypatch.setattr(nodes, "hybrid_search", spy)
+    asyncio.run(
+        nodes.retrieve_node(
+            {"question": "转专业条件", "kb_id": None, "kb_ids": ["kb-a", "kb-b"]}
+        )
+    )
+    assert seen["kb_ids"] == ["kb-a", "kb-b"]
+
+
+def test_retrieve_forwards_empty_scope(monkeypatch):
+    """无可见库时传空列表（而非 None），检索层据此不下发任何文档。"""
+    from app.services.rag.langgraph import nodes
+
+    seen = {}
+
+    async def spy(query, kb_id, top_k=5, search_type="hybrid", kb_ids=None):
+        seen["kb_ids"] = kb_ids
+        return []
+
+    monkeypatch.setattr(nodes, "hybrid_search", spy)
+    asyncio.run(nodes.retrieve_node({"question": "转专业条件", "kb_id": None, "kb_ids": []}))
+    assert seen["kb_ids"] == []

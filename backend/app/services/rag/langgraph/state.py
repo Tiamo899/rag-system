@@ -11,6 +11,7 @@ class RAGState(TypedDict, total=False):
     retrieved_chunks: list         # 检索到的分块
     has_relevant_content: bool     # 评估节点：是否有关联内容
     context: str                   # 编号后的上下文
+    selected_chunks: list          # 评估节点选中的 3 条（去重后，上下文与来源同源）
     answer: str                    # 生成的回答
     sources: list                  # 引用来源
     error: str                     # 错误信息

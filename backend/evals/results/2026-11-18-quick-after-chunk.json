@@ -1,0 +1,143 @@
+{
+  "summary": {
+    "tag": "after-chunk",
+    "date": "2026-11-18",
+    "base_url": "http://localhost",
+    "hit_at3": "10/10",
+    "avg_ctx_chars": 2785,
+    "median_ctx_chars": 2775,
+    "multi_source_rate": "10/10"
+  },
+  "rows": [
+    {
+      "q": "挂科了还能评奖学金吗",
+      "expect": "奖学金评定办法.docx",
+      "top3": [
+        "奖学金评定办法.docx",
+        "奖学金评定办法.docx",
+        "学生手册（总则与入学注册篇）.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2892,
+      "distinct_docs": 2,
+      "expanded": 1
+    },
+    {
+      "q": "国家助学金的申请条件是什么",
+      "expect": "国家助学金评审办法.docx",
+      "top3": [
+        "国家助学金评审办法.docx",
+        "勤工助学与助学贷款管理办法.docx",
+        "学生手册（总则与入学注册篇）.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2658,
+      "distinct_docs": 3,
+      "expanded": 0
+    },
+    {
+      "q": "补考不及格还能拿到毕业证吗",
+      "expect": "补考、重修与缓考管理办法.docx",
+      "top3": [
+        "补考、重修与缓考管理办法.docx",
+        "课程考核与成绩管理.docx",
+        "学籍管理规定.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 3063,
+      "distinct_docs": 3,
+      "expanded": 1
+    },
+    {
+      "q": "宿舍晚归会怎么处理",
+      "expect": "学生宿舍管理办法.docx",
+      "top3": [
+        "学生宿舍管理办法.docx",
+        "学生考勤与请假管理办法.docx",
+        "学生违纪处分规定.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2406,
+      "distinct_docs": 3,
+      "expanded": 1
+    },
+    {
+      "q": "转专业需要满足什么条件",
+      "expect": "转专业实施办法.docx",
+      "top3": [
+        "转专业实施办法.docx",
+        "学籍管理规定.docx",
+        "毕业与学位授予工作细则.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 3022,
+      "distinct_docs": 3,
+      "expanded": 0
+    },
+    {
+      "q": "勤工助学怎么申请",
+      "expect": "勤工助学与助学贷款管理办法.docx",
+      "top3": [
+        "勤工助学与助学贷款管理办法.docx",
+        "学生手册（总则与入学注册篇）.docx",
+        "国家助学金评审办法.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2658,
+      "distinct_docs": 3,
+      "expanded": 0
+    },
+    {
+      "q": "课程考核不及格怎么办",
+      "expect": "课程考核与成绩管理.docx",
+      "top3": [
+        "课程考核与成绩管理.docx",
+        "补考、重修与缓考管理办法.docx",
+        "课程考核与成绩管理.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2937,
+      "distinct_docs": 2,
+      "expanded": 1
+    },
+    {
+      "q": "学生请假超过三天需要谁批准",
+      "expect": "学生考勤与请假管理办法.docx",
+      "top3": [
+        "学生考勤与请假管理办法.docx",
+        "休学、复学与退学管理办法.docx",
+        "学生手册（总则与入学注册篇）.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2614,
+      "distinct_docs": 3,
+      "expanded": 0
+    },
+    {
+      "q": "校园卡丢了怎么补办",
+      "expect": "校园一卡通使用与管理.docx",
+      "top3": [
+        "校园一卡通使用与管理.docx",
+        "学生手册（总则与入学注册篇）.docx",
+        "图书馆借阅与服务指南.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 2584,
+      "distinct_docs": 3,
+      "expanded": 0
+    },
+    {
+      "q": "毕业需要满足什么条件",
+      "expect": "毕业与学位授予工作细则.docx",
+      "top3": [
+        "毕业与学位授予工作细则.docx",
+        "转专业实施办法.docx",
+        "学籍管理规定.docx"
+      ],
+      "hit": true,
+      "ctx_chars": 3022,
+      "distinct_docs": 3,
+      "expanded": 0
+    }
+  ]
+}

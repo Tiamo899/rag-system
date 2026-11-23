@@ -9,8 +9,36 @@ export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
 export async function createKnowledgeBase(data: {
   name: string
   description?: string
+  visibility?: 'public' | 'restricted'
+  allowed_roles?: string[]
+  allowed_users?: string[]
 }): Promise<KnowledgeBase> {
   const res = await http.post<KnowledgeBase>('/knowledge-bases', data)
+  return res.data
+}
+
+export async function updateKnowledgeBase(
+  id: string,
+  data: {
+    name?: string
+    description?: string
+    visibility?: 'public' | 'restricted'
+    allowed_roles?: string[]
+    allowed_users?: string[]
+  }
+): Promise<KnowledgeBase> {
+  const res = await http.put<KnowledgeBase>(`/knowledge-bases/${id}`, data)
+  return res.data
+}
+
+export interface KbAccessOptions {
+  roles: string[]
+  users: { id: string; username: string; email: string }[]
+  can_grant_users: boolean
+}
+
+export async function fetchKbAccessOptions(): Promise<KbAccessOptions> {
+  const res = await http.get<KbAccessOptions>('/knowledge-bases/access-options')
   return res.data
 }
 
