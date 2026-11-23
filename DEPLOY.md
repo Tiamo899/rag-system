@@ -57,11 +57,12 @@ docker compose up -d --build     # 代码变更后重新构建并启动
 默认 mock 演示。接真实模型在**根目录 `.env`** 配（容器走 compose 注入；本地开发走 `backend/.env`）：
 
 ```env
-# LLM（OpenAI 兼容 chat completions）
+# LLM（OpenAI 兼容 chat completions，当前使用智谱 GLM）
 LLM_PROVIDER=openai
 LLM_API_KEY=<你的 key>
-LLM_BASE_URL=https://api.siliconflow.cn/v1      # 硅基流动示例；DeepSeek 用 https://api.deepseek.com
-LLM_MODEL=Qwen/Qwen2.5-7B-Instruct              # 硅基流动免费模型；DeepSeek 用 deepseek-v4-flash（deepseek-chat 已停用）
+LLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
+LLM_MODEL=glm-4-flash-250414
+LLM_FALLBACK_MODELS=glm-4.7-flash                # 主模型限流/空响应时依次降级
 
 # Embedding（OpenAI 兼容 embeddings）
 EMBEDDING_PROVIDER=openai
